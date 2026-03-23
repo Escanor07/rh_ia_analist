@@ -1,93 +1,92 @@
-# lubtrac_rh
+# Hiring Intelligence — Lubtrac RH Module
+
+External hiring intelligence module for Lubtrac's HR system. Indexes candidate CVs using AI, matches them against job profiles via vector similarity, and provides recruitment funnel analytics through a React dashboard.
 
 
+## Setup
 
-## Getting started
+### Prerequisites
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- Python 3.12+
+- PostgreSQL with pgvector extension
+- Node.js 20+
+- Access to client's MySQL database (read-only)
+- AWS credentials for S3 bucket
+- OpenAI API key
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+### Backend
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```bash
+python -m venv .venv
+source .venv/bin/activate
+cp .env.example .env   # fill in all values
+pip install -r requirements.txt
+python manage.py migrate
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/go-labs/lubtrac_rh.git
-git branch -M main
-git push -uf origin main
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev       # dev server on :5173, proxies /api to :8000
+npm run build     # production build to dist/
 ```
 
-## Integrate with your tools
+### Running
 
-* [Set up project integrations](https://gitlab.com/go-labs/lubtrac_rh/-/settings/integrations)
+```bash
+python manage.py runserver   # API on :8000
+```
 
-## Collaborate with your team
+## Management Commands
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```bash
+# Index CVs from client's MySQL/S3
+python manage.py ingest_cv_batch --batch-size 50
 
-## Test and Deploy
+# Index a single CV by document ID
+python manage.py ingest_sample_cv --doc-id 1819
 
-Use the built-in continuous integration in GitLab.
+# Sync job vacancies from client's MySQL
+python manage.py sync_vacancies
+python manage.py sync_vacancies --source-id 42
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## API Endpoints
 
-***
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health/` | Health check (Postgres + pgvector) |
+| GET | `/api/vacancies/` | List synced vacancies |
+| POST | `/api/vacancies/<id>/match/` | Run matching for a vacancy |
+| GET | `/api/vacancies/<id>/detail/` | Vacancy detail with candidates |
+| GET | `/api/matching/weights/` | Default matching weights |
+| GET | `/api/dashboard/` | Full dashboard data |
+| POST | `/api/pipeline/ingest/` | Start CV ingestion (async) |
+| POST | `/api/pipeline/sync/` | Start vacancy sync (async) |
+| GET | `/api/pipeline/status/` | Pipeline execution status |
 
-# Editing this README
+## Environment Variables
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+See `.env.example` for the full list. Key variables:
 
-## Suggestions for a good README
+- `SECRET_KEY` — Django secret key
+- `DB_*` — PostgreSQL connection
+- `CLIENT_MYSQL_*` — Client MySQL connection (read-only)
+- `S3_CV_BUCKET`, `AWS_*` — S3 bucket for CV files
+- `OPENAI_API_KEY` — OpenAI API key
+- `DATA_CUTOFF_DATE` — Only process data from this date onward
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## Stack
 
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+| Component | Technology |
+|---|---|
+| Backend | Django 6 · Python 3.12 |
+| Database | PostgreSQL + pgvector |
+| Client DB | MySQL (read-only) |
+| File Storage | AWS S3 |
+| Text Extraction | Docling |
+| LLM Classification | OpenAI gpt-4.1-mini |
+| Embeddings | OpenAI text-embedding-3-large (2000 dims) |
+| Frontend | React 19 · Vite · Tailwind CSS v4 |

@@ -68,15 +68,6 @@ class CandidateScore:
     def score_100(self) -> int:
         return round(self.final_score * 100)
 
-    @property
-    def score_label(self) -> str:
-        s = self.score_100
-        if s >= 70:
-            return "alta"
-        elif s >= 50:
-            return "media"
-        return "baja"
-
 
 class MatchScorer:
     def __init__(self, weights: dict[str, float] | None = None):
