@@ -1,0 +1,10 @@
+Django
+psycopg2-binary
+mysqlclient
+pgvector
+python-dotenv
+openai
+tiktoken
+langchain-text-splitters
+docling
+boto3
