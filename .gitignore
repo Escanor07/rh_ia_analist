@@ -1,23 +1,40 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyc
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Django
+*.sqlite3
+db.sqlite3
+staticfiles/
+media/
 
 # Environment
 .env
-.env.local
-.venv/
-venv/
-
-
-# Database
-db.sqlite3
-db.sqlite3-journal
-
-# Logs
-*.log
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
