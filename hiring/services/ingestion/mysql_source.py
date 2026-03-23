@@ -1,0 +1,76 @@
+from dataclasses import dataclass
+from django.conf import settings
+from hiring.services.shared.mysql_client import MySQLClient
+
+
+@dataclass
+class SourceCVRecord:
+    doc_id: int
+    candidate_id: int | None
+    collaborator_id: int | None
+    vacante_id: int | None
+    candidate_name: str
+    candidate_email: str
+    candidate_phone: str
+    upload_date: str | None
+    source_key: str
+
+
+class MySQLSourceService:
+    BASE_QUERY = """
+        SELECT
+            d.id AS doc_id,
+            d.candidato_id,
+            d.colaborador_id,
+            d.fecha AS upload_date,
+            d.url_documento AS source_key,
+            COALESCE(vc.nombre, '') AS candidate_name,
+            COALESCE(vc.correo, '') AS candidate_email,
+            COALESCE(vc.telefono, '') AS candidate_phone,
+            vc.vacante_id
+        FROM gestor_rh_candidato_documento d
+        LEFT JOIN gestor_rh_vacante_candidato vc
+            ON vc.id = d.candidato_id
+        WHERE d.nombre_documento = 'CV'
+          AND d.url_documento IS NOT NULL
+          AND TRIM(d.url_documento) <> ''
+          AND d.fecha >= %s
+    """
+
+    ORDER_BY = " ORDER BY d.fecha DESC, d.id DESC"
+
+    def __init__(self):
+        self.db = MySQLClient()
+
+    def fetch_cv_records(self, limit: int | None = None) -> list[SourceCVRecord]:
+        query = self.BASE_QUERY + self.ORDER_BY
+        params = (settings.DATA_CUTOFF_DATE,)
+
+        if limit is not None:
+            query += " LIMIT %s"
+            params = (settings.DATA_CUTOFF_DATE, limit)
+
+        rows = self.db.fetch_all(query, params)
+        return [self._map_row(row) for row in rows]
+
+    def fetch_cv_record_by_doc_id(self, doc_id: int) -> SourceCVRecord | None:
+        query = self.BASE_QUERY + " AND d.id = %s LIMIT 1"
+        rows = self.db.fetch_all(query, (settings.DATA_CUTOFF_DATE, doc_id))
+
+        if not rows:
+            return None
+
+        return self._map_row(rows[0])
+
+    def _map_row(self, row: dict) -> SourceCVRecord:
+        return SourceCVRecord(
+            doc_id=row["doc_id"],
+            candidate_id=row["candidato_id"],
+            collaborator_id=row["colaborador_id"],
+            vacante_id=row.get("vacante_id"),
+            candidate_name=row["candidate_name"],
+            candidate_email=row["candidate_email"],
+            candidate_phone=row["candidate_phone"],
+            upload_date=str(row["upload_date"]) if row["upload_date"] else None,
+            source_key=row["source_key"],
+        )
