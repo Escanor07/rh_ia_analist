@@ -19,6 +19,7 @@ DASHBOARD_ANALYTICS_CACHE_SECONDS = int(os.getenv('DASHBOARD_ANALYTICS_CACHE_SEC
 
 INSTALLED_APPS = [
     'django.contrib.contenttypes',
+    'django.contrib.postgres',
     'hiring',
 ]
 
