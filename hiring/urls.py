@@ -11,4 +11,9 @@ urlpatterns = [
     path("api/pipeline/ingest/", views.pipeline_ingest),
     path("api/pipeline/sync/", views.pipeline_sync),
     path("api/pipeline/status/", views.pipeline_status),
+    path("api/standards/", views.list_standards),
+    path("api/standards/catalog/", views.attribute_catalog),
+    path("api/standards/create/", views.create_standard),
+    path("api/standards/<int:standard_id>/", views.update_standard),
+    path("api/standards/<int:standard_id>/delete/", views.delete_standard),
 ]
