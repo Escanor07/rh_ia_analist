@@ -1,10 +1,9 @@
 import re
+from datetime import datetime
 from django.conf import settings
 from hiring.services.analytics.dates import days_between
 from hiring.services.shared.mysql_client import MySQLClient
 
-CANDIDATE_FUNNEL_STATUS_IDS = (1, 2, 3, 4, 6, 7, 8)
-VACANCY_FUNNEL_STATUS_IDS = tuple(range(1, 10))
 DISCARD_PATTERNS = [
     ("Expectativa salarial", re.compile(r"percepci[oó]n econ[oó]mica|salari|sueldo|econ[oó]mica.*superior", re.I)),
     ("Otra oferta", re.compile(r"otra oferta|otra empresa|acepto.*otra|declin[oó]", re.I)),
@@ -13,6 +12,35 @@ DISCARD_PATTERNS = [
     ("Perfil no apto", re.compile(r"no cumple|no cuenta|perfil|experiencia.*enfocad|no apto", re.I)),
     ("Otro", re.compile(r".*")),
 ]
+
+STAGE_LABELS = {
+    "Nuevo Candidato": "Filtros RH",
+    "Candidato Aprobado": "Aprobado",
+    "Se agenda la entrevista": "Agenda Entrevista",
+    "Entrevistado": "Entrevistado",
+    "Candidato Final": "Finalista",
+    "propuesta": "Propuesta",
+    "Se Agendo Ingreso": "Ingreso",
+    "Vacante Finalizada": "Contratado",
+}
+
+# Ordered list for building conversion funnels
+STAGE_ORDER_LABELS = [
+    "Filtros RH", "Aprobado", "Agenda Entrevista", "Entrevistado",
+    "Finalista", "Propuesta", "Ingreso", "Contratado",
+]
+
+FUNNEL_HISTORY_ACTIONS = (
+    "Nuevo Candidato",
+    "Se agenda la entrevista",
+    "Entrevistado",
+    "Candidato Aprobado",
+    "Candidato Final",
+    "propuesta",
+    "Se Agendo Ingreso",
+    "Vacante Finalizada",
+)
+_FUNNEL_ACTIONS_SQL_IN = ", ".join(["%s"] * len(FUNNEL_HISTORY_ACTIONS))
 
 
 class FunnelAnalyticsService:
@@ -39,50 +67,56 @@ class FunnelAnalyticsService:
                     "conversion_rate": _pct(th, tc), "drop_off_rate": _pct(td, tc),
                 },
                 "candidate_funnel": self._candidate_funnel(s),
-                "vacancy_funnel": self._vacancy_funnel(s),
                 "vacancy_sla": self._vacancy_sla(s),
-                "discard_reasons": self._discard_reasons(s, 30),
-                "active_vacancies": self._get_active_vacancies(s),
+                "discard_reasons": self._discard_reasons(s, 50),
+                "all_vacancies": self._get_all_vacancies(s),
+                "candidate_sla": self._candidate_sla(s),
+                "turnover": self._turnover_stats(s),
             }
 
     def _candidate_funnel(self, s) -> dict:
-        rows = s.fetch_all("""
-            SELECT cs.id AS sid, cs.descripcion AS label, COUNT(vc.id) AS total
-            FROM gestor_rh_candidato_status cs
-            LEFT JOIN (gestor_rh_vacante_candidato vc
-                INNER JOIN gestor_rh_vacante v ON v.id=vc.vacante_id AND v.fecha_solicitud >= %s
-            ) ON vc.status_id=cs.id
-            GROUP BY cs.id, cs.descripcion ORDER BY cs.id
-        """, (self.cutoff,))
-        labels = {r["sid"]: r["label"] for r in rows}
-        counts = {r["sid"]: r["total"] for r in rows}
-        total = sum(counts.get(sid, 0) for sid in CANDIDATE_FUNNEL_STATUS_IDS) + counts.get(5, 0)
+        rows = s.fetch_all(f"""
+            SELECT h.candidato_id, h.accion
+            FROM gestor_rh_candidato_historial h
+            INNER JOIN gestor_rh_vacante_candidato vc ON vc.id = h.candidato_id
+            INNER JOIN gestor_rh_vacante v ON v.id = vc.vacante_id
+            WHERE v.fecha_solicitud >= %s
+              AND h.accion IN ({_FUNNEL_ACTIONS_SQL_IN})
+        """, (self.cutoff, *FUNNEL_HISTORY_ACTIONS))
+
+        # Count unique candidates per stage
+        stage_candidates: dict[str, set] = {}
+        for r in rows:
+            action = r["accion"]
+            cid = r["candidato_id"]
+            stage_candidates.setdefault(action, set()).add(cid)
+
+        all_cids = set().union(*stage_candidates.values()) if stage_candidates else set()
+        total = len(all_cids)
+
+        # Build ordered funnel — order matches real candidate flow
+        funnel_def = [
+            ("Nuevo Candidato", "Filtros RH"),
+            ("Candidato Aprobado", "Aprobado"),
+            ("Se agenda la entrevista", "Agenda Entrevista"),
+            ("Entrevistado", "Entrevistado"),
+            ("Candidato Final", "Candidato Final"),
+            ("propuesta", "Propuesta"),
+            ("Se Agendo Ingreso", "Ingreso"),
+            ("Vacante Finalizada", "Contratado"),
+        ]
 
         stages = []
-        for sid in CANDIDATE_FUNNEL_STATUS_IDS:
-            c = counts.get(sid, 0)
-            stages.append({
-                "status_id": sid, "label": labels.get(sid, ""),
-                "count": c,
-                "pct_of_total": _pct(c, total) if total > 0 else 0,
-            })
+        for action, label in funnel_def:
+            count = len(stage_candidates.get(action, set()))
+            if count > 0:
+                stages.append({
+                    "label": label,
+                    "count": count,
+                    "pct": _pct(count, total),
+                })
 
-        return {"stages": stages, "descartados": counts.get(5, 0), "propuestas": counts.get(9, 0)}
-
-    def _vacancy_funnel(self, s) -> dict:
-        rows = s.fetch_all("""
-            SELECT sv.id AS sid, sv.descripcion AS label, COUNT(v.id) AS total
-            FROM gestor_rh_status_vacante sv
-            LEFT JOIN gestor_rh_vacante v ON v.status_id=sv.id AND v.fecha_solicitud >= %s
-            GROUP BY sv.id, sv.descripcion ORDER BY sv.id
-        """, (self.cutoff,))
-        labels = {r["sid"]: r["label"] for r in rows}
-        counts = {r["sid"]: r["total"] for r in rows}
-        stages = [
-            {"status_id": sid, "label": labels.get(sid, ""), "count": counts.get(sid, 0)}
-            for sid in VACANCY_FUNNEL_STATUS_IDS
-        ]
-        return {"stages": stages}
+        return {"stages": stages, "total": total}
 
     def _vacancy_sla(self, s) -> dict:
         rows = s.fetch_all("""
@@ -123,26 +157,182 @@ class FunnelAnalyticsService:
             cats[cat] = cats.get(cat, 0) + 1
         return {"by_category": cats}
 
-    def _get_active_vacancies(self, s) -> list:
+    def _get_all_vacancies(self, s) -> list:
         rows = s.fetch_all("""
             SELECT v.id AS vid, COALESCE(pp.nombre,'') AS perfil,
-                   COALESCE(sv.descripcion,'') AS status,
+                   COALESCE(sv.descripcion,'') AS status, v.status_id,
+                   v.fecha_solicitud,
                    (SELECT COUNT(*) FROM gestor_rh_vacante_candidato vc WHERE vc.vacante_id=v.id) AS candidatos,
                    (SELECT COUNT(*) FROM gestor_rh_vacante_candidato vc WHERE vc.vacante_id=v.id AND vc.status_id=5) AS descartados
             FROM gestor_rh_vacante v
             LEFT JOIN gestor_rh_perfil_puesto pp ON pp.id=v.perfil_puesto_id
             LEFT JOIN gestor_rh_status_vacante sv ON sv.id=v.status_id
-            WHERE v.status_id BETWEEN 2 AND 8 AND v.fecha_solicitud >= %s
-            ORDER BY v.status_id, v.fecha_solicitud DESC
+            WHERE v.status_id != 10 AND v.fecha_solicitud >= %s
+            ORDER BY v.fecha_solicitud DESC
         """, (self.cutoff,))
         return [{"vacante_id": r["vid"], "perfil": r["perfil"], "status": r["status"],
-                 "candidatos": r["candidatos"], "descartados": r["descartados"]} for r in rows]
+                 "candidatos": r["candidatos"], "descartados": r["descartados"],
+                 "fecha": str(r["fecha_solicitud"]) if r.get("fecha_solicitud") else None}
+                for r in rows]
+
+    def _candidate_sla(self, s) -> dict:
+        rows = s.fetch_all(f"""
+            SELECT h.candidato_id, h.accion, h.fecha
+            FROM gestor_rh_candidato_historial h
+            INNER JOIN gestor_rh_vacante_candidato vc ON vc.id = h.candidato_id
+            INNER JOIN gestor_rh_vacante v ON v.id = vc.vacante_id
+            WHERE v.fecha_solicitud >= %s
+              AND h.accion IN ({_FUNNEL_ACTIONS_SQL_IN})
+            ORDER BY h.candidato_id, h.fecha
+        """, (self.cutoff, *FUNNEL_HISTORY_ACTIONS))
+
+        # Group actions by candidate
+        by_candidate: dict[int, list[tuple[str, object]]] = {}
+        for r in rows:
+            cid = r["candidato_id"]
+            by_candidate.setdefault(cid, []).append((r["accion"], r["fecha"]))
+
+        # Compute transition times
+        transitions: dict[str, list[float]] = {}
+        for cid, actions in by_candidate.items():
+            for i in range(len(actions) - 1):
+                from_action, from_date = actions[i]
+                to_action, to_date = actions[i + 1]
+                if from_date and to_date:
+                    delta = (to_date - from_date).total_seconds() / 86400  # days
+                    if 0 <= delta <= 365:
+                        key = f"{STAGE_LABELS.get(from_action, from_action)} → {STAGE_LABELS.get(to_action, to_action)}"
+                        transitions.setdefault(key, []).append(delta)
+
+        sla_stages = []
+        for key, days_list in transitions.items():
+            if len(days_list) >= 2:
+                sla_stages.append({
+                    "transition": key,
+                    "avg_days": round(_avg(days_list), 1),
+                    "count": len(days_list),
+                })
+
+        # Sort by frequency
+        sla_stages.sort(key=lambda x: x["count"], reverse=True)
+
+        return {"stages": sla_stages[:10]}
+
+    def _turnover_stats(self, s) -> dict:
+        rows = s.fetch_all("""
+            SELECT ct.id, ct.reason, ct.type, ct.request_date, ct.termination_date,
+                   ct.collaborator_id
+            FROM gestor_rh_collaborator_termination ct
+            ORDER BY ct.termination_date DESC
+        """)
+
+        if not rows:
+            return {"total": 0, "by_type": {}, "reasons": []}
+
+        by_type: dict[str, int] = {}
+        reasons: dict[str, int] = {}
+
+        for r in rows:
+            t = (r.get("type") or "Otro").strip()
+            by_type[t] = by_type.get(t, 0) + 1
+            reason = (r.get("reason") or "").strip()
+            if reason:
+                reasons[reason] = reasons.get(reason, 0) + 1
+
+        sorted_reasons = sorted(reasons.items(), key=lambda x: x[1], reverse=True)[:10]
+
+        return {
+            "total": len(rows),
+            "by_type": by_type,
+            "reasons": [{"reason": r, "count": c} for r, c in sorted_reasons],
+        }
+
+    def get_vacancy_candidate_pipeline(self, vacancy_id: int) -> dict:
+        rows = self.db.fetch_all("""
+            SELECT h.candidato_id, h.accion, h.descripcion, h.fecha,
+                   vc.nombre AS candidato_nombre
+            FROM gestor_rh_candidato_historial h
+            INNER JOIN gestor_rh_vacante_candidato vc ON vc.id = h.candidato_id
+            WHERE vc.vacante_id = %s
+            ORDER BY h.fecha ASC
+        """, (vacancy_id,))
+
+        by_candidate: dict[int, dict] = {}
+        for r in rows:
+            cid = r["candidato_id"]
+            if cid not in by_candidate:
+                by_candidate[cid] = {
+                    "candidato_id": cid,
+                    "nombre": r.get("candidato_nombre", ""),
+                    "events": [],
+                }
+            by_candidate[cid]["events"].append({
+                "accion": r["accion"],
+                "descripcion": r.get("descripcion", ""),
+                "fecha": str(r["fecha"])[:16] if r.get("fecha") else None,
+            })
+
+        # Compute SLA per candidate
+        candidates = []
+        for cid, data in by_candidate.items():
+            events = data["events"]
+            total_days = None
+            if len(events) >= 2:
+                first = events[0].get("fecha")
+                last = events[-1].get("fecha")
+                if first and last:
+                    try:
+                        t0 = datetime.fromisoformat(first.replace(" ", "T"))
+                        t1 = datetime.fromisoformat(last.replace(" ", "T"))
+                        total_days = round((t1 - t0).total_seconds() / 86400, 1)
+                    except (ValueError, TypeError):
+                        pass
+
+            current_stage = events[-1]["accion"] if events else "—"
+            candidates.append({
+                "candidato_id": cid,
+                "nombre": data["nombre"],
+                "current_stage": STAGE_LABELS.get(current_stage, current_stage),
+                "total_events": len(events),
+                "total_days": total_days,
+                "events": events,
+            })
+
+        candidates.sort(key=lambda c: c["total_events"], reverse=True)
+
+        stage_counts: dict[str, int] = {}
+        for c in candidates:
+            seen = set()
+            for e in c["events"]:
+                label = STAGE_LABELS.get(e["accion"], e["accion"])
+                seen.add(label)
+            for label in seen:
+                stage_counts[label] = stage_counts.get(label, 0) + 1
+
+        total_candidates = len(candidates)
+        conversion = []
+        for stage in STAGE_ORDER_LABELS:
+            count = stage_counts.get(stage, 0)
+            if count > 0:
+                conversion.append({
+                    "stage": stage,
+                    "count": count,
+                    "pct": _pct(count, total_candidates),
+                })
+
+        return {
+            "candidates": candidates[:50],
+            "conversion": conversion,
+            "total_candidates": total_candidates,
+        }
 
 
-def _pct(p, t): return round(p / t * 100, 1) if t > 0 else 0.0
+def _pct(p, t):
+    return round(p / t * 100, 1) if t > 0 else 0.0
 
 
-def _avg(v): return round(sum(v) / len(v), 1) if v else 0.0
+def _avg(v):
+    return round(sum(v) / len(v), 1) if v else 0.0
 
 
 def _categorize(t):
