@@ -57,6 +57,7 @@ class CandidateIngestionPipeline:
                         "candidate_email": record.candidate_email,
                     },
                     "quality": classification.quality,
+                    "attributes": classification.attributes,
                     "llm_usage": classification.llm_usage,
                 }
                 document.save()
