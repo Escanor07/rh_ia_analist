@@ -146,3 +146,41 @@ class MatchRunCandidate(models.Model):
 
     def __str__(self):
         return f"#{self.rank} {self.candidate_name} ({self.score}%)"
+
+
+class GlobalStandard(models.Model):
+    class StandardType(models.TextChoices):
+        TEXT = "text", "Texto"
+        ATTRIBUTE = "attribute", "Atributo"
+
+    class EvalMode(models.TextChoices):
+        SCORE = "score", "Puntuación"
+        FILTER = "filter", "Filtro"
+        INFO = "informational", "Informativo"
+
+    name = models.CharField(max_length=200)
+    standard_type = models.CharField(max_length=20, choices=StandardType.choices, default=StandardType.TEXT)
+    eval_mode = models.CharField(max_length=20, choices=EvalMode.choices, default=EvalMode.SCORE)
+
+    content = models.TextField(blank=True, default="", help_text="Criterio en texto libre (tipo text)")
+    embedding = VectorField(dimensions=settings.OPENAI_EMBEDDING_DIMENSIONS, null=True, blank=True)
+
+    attribute_slug = models.CharField(
+        max_length=50, blank=True, default="",
+        help_text="Slug del atributo: stability, min_experience, min_education, cv_completeness",
+    )
+    attribute_config = models.JSONField(
+        default=dict, blank=True,
+        help_text="Config del atributo, ej: {min_level: media}, {min_years: 2}",
+    )
+
+    weight = models.FloatField(default=1.0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} [{self.standard_type}/{self.eval_mode}]"
