@@ -2,15 +2,21 @@ import logging
 
 from hiring.models import Vacancy
 from hiring.services.matching.scorer import CandidateScore, MatchScorer
-from hiring.services.matching.searcher import ProfileSearcher
+from hiring.services.matching.searcher import ChunkMatch, ProfileSearcher
 
 logger = logging.getLogger(__name__)
 
 
 class MatchingPipeline:
-    def __init__(self, top_k_per_section: int = 30, top_k_full: int = 40, weights: dict[str, float] | None = None):
+    def __init__(
+        self,
+        top_k_per_section: int = 30,
+        top_k_full: int = 40,
+        weights: dict[str, float] | None = None,
+        standards_score_by_doc: dict[int, float] | None = None,
+    ):
         self.searcher = ProfileSearcher(top_k=top_k_per_section)
-        self.scorer = MatchScorer(weights=weights)
+        self.scorer = MatchScorer(weights=weights, standards_score_by_doc=standards_score_by_doc)
         self.top_k_full = top_k_full
 
     def match_vacancy(self, vacancy: Vacancy, top_n: int = 10) -> list[CandidateScore]:
@@ -20,25 +26,25 @@ class MatchingPipeline:
             logger.warning("Vacancy #%d without embeddings.", vacancy.source_id)
             return []
 
-        section_matches: dict[str, list] = {}
+        vacancy_section_types = {s.section_type for s in sections}
+
+        section_matches: dict[str, list[ChunkMatch]] = {}
         for section in sections:
-            logger.info(
-                "Searching section '%s' of vacancy #%d...",
-                section.section_type, vacancy.source_id,
-            )
             matches = self.searcher.search_by_section(
                 embedding=section.embedding,
                 section_type=section.section_type,
             )
             section_matches[section.section_type] = matches
 
-        logger.info("Searching with full profile of vacancy #%d...", vacancy.source_id)
         full_matches = self.searcher.search_full(
             embedding=vacancy.full_embedding,
             top_k=self.top_k_full,
         )
 
-        all_scores = self.scorer.score_candidates(section_matches, full_matches)
+        all_scores = self.scorer.score_candidates(
+            section_matches, full_matches,
+            vacancy_section_types=vacancy_section_types,
+        )
 
         logger.info(
             "Matching vacancy #%d '%s': %d candidates, top=%.4f",

@@ -33,6 +33,7 @@ SECTION_LABELS: dict[str, str] = {
     "general": "Adicionales",
 }
 
+TRIVIAL_VALUES = {"n/a", "na", "ninguno", "ninguna", "no aplica", "-", ".", ""}
 
 @dataclass
 class RawCharacteristic:
@@ -100,11 +101,7 @@ class VacancySyncService:
         raw_vacancies = self._fetch_all_vacancies()
         logger.info("Vacancies found: %d", len(raw_vacancies))
 
-        created = 0
-        updated = 0
-        unchanged = 0
-        skipped = 0
-
+        created, updated, unchanged, skipped = 0, 0, 0, 0
         for raw in raw_vacancies:
             if not raw.characteristics:
                 skipped += 1
@@ -160,16 +157,11 @@ class VacancySyncService:
         chars_by_vacante: dict[int, list[RawCharacteristic]] = {}
         for row in all_chars:
             desc = (row.get("descripcion") or "").strip()
-            if not desc or desc.upper() == "N/A":
+            if self._is_trivial(desc):
                 continue
             vid = row["vacante_id"]
-            if vid not in chars_by_vacante:
-                chars_by_vacante[vid] = []
-            chars_by_vacante[vid].append(
-                RawCharacteristic(
-                    tipo=(row.get("tipo") or "").strip(),
-                    descripcion=desc,
-                )
+            chars_by_vacante.setdefault(vid, []).append(
+                RawCharacteristic(tipo=(row.get("tipo") or "").strip(), descripcion=desc)
             )
 
         vacancies = []
@@ -195,9 +187,11 @@ class VacancySyncService:
                 descripcion=(row.get("descripcion") or "").strip(),
             )
             for row in rows
-            if (row.get("descripcion") or "").strip()
-            and (row.get("descripcion") or "").strip().upper() != "N/A"
+            if not self._is_trivial((row.get("descripcion") or "").strip())
         ]
+
+    def _is_trivial(self, text: str) -> bool:
+        return text.lower().strip().rstrip(".") in TRIVIAL_VALUES
 
     def _map_row(self, row: dict) -> RawVacancy:
         return RawVacancy(
@@ -227,9 +221,20 @@ class VacancySyncService:
 
         return sections
 
+    def _build_enriched_section(self, raw: RawVacancy, section_type: str, raw_content: str) -> str:
+        label = SECTION_LABELS.get(section_type, section_type.title())
+        tipo_label = f" ({raw.tipo_vacante})" if raw.tipo_vacante else ""
+
+        header = f"Puesto: {raw.profile_name}{tipo_label}"
+        if raw.objective:
+            header += f"\nObjetivo del puesto: {raw.objective}"
+
+        return f"{header}\nRequisito de {label}:\n{raw_content}"
+
     def _build_full_content(self, raw: RawVacancy, sections: dict[str, str]) -> str:
         parts = [f"Puesto: {raw.profile_name}"]
-
+        if raw.tipo_vacante:
+            parts[0] += f" ({raw.tipo_vacante})"
         if raw.objective:
             parts.append(f"Objetivo: {raw.objective}")
 
@@ -256,11 +261,12 @@ class VacancySyncService:
         if existing and existing.snapshot_hash == content_hash:
             return "unchanged"
 
-        # Generar embeddings
+        # Build enriched texts for embedding
         texts_to_embed = [full_content]
         section_types_order = list(sections_content.keys())
         for st in section_types_order:
-            texts_to_embed.append(sections_content[st])
+            enriched = self._build_enriched_section(raw, st, sections_content[st])
+            texts_to_embed.append(enriched)
 
         embed_result = self.embedding_service.embed_texts_with_usage(texts_to_embed)
         embeddings = embed_result["embeddings"]
