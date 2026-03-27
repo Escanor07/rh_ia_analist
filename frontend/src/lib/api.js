@@ -10,54 +10,40 @@ async function fetchJson(path, options = {}) {
   return response.json()
 }
 
-export function fetchVacancies() {
-  return fetchJson('/vacancies/')
-}
-
-export function runMatching(sourceId, topN = 10, weights = null) {
-  const body = { top_n: topN }
-  if (weights) body.weights = weights
-
-  return fetchJson(`/vacancies/${sourceId}/match/`, {
+function postJson(path, body = {}) {
+  return fetchJson(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
 }
 
-export function fetchDefaultWeights() {
-  return fetchJson('/matching/weights/')
+export const fetchVacancies = () => fetchJson('/vacancies/')
+export const fetchDefaultWeights = () => fetchJson('/matching/weights/')
+export const fetchDashboard = () => fetchJson('/dashboard/')
+export const fetchPipelineStatus = () => fetchJson('/pipeline/status/')
+export const fetchVacancyDetail = (id) => fetchJson(`/vacancies/${id}/detail/`)
+export const runMatching = (id, topN = 10, weights = null) => {
+  const body = { top_n: topN }
+  if (weights) body.weights = weights
+  return postJson(`/vacancies/${id}/match/`, body)
 }
 
-export function fetchDashboard() {
-  return fetchJson('/dashboard/')
+function rethrowPipelineConflict(e) {
+  if (e.status === 409) throw new Error('Proceso corriendo')
+  throw e
 }
 
-export function startIngest(batchSize) {
-  return fetch(`${API}/pipeline/ingest/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(batchSize ? { batch_size: batchSize } : {}),
-  }).then((r) => {
-    if (!r.ok) throw new Error('Proceso corriendo')
-    return r.json()
-  })
+export function startIngest(bs) {
+  return postJson('/pipeline/ingest/', bs ? { batch_size: bs } : {}).catch(rethrowPipelineConflict)
 }
 
 export function startSyncVacancies() {
-  return fetch(`${API}/pipeline/sync/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  }).then((r) => {
-    if (!r.ok) throw new Error('Proceso corriendo')
-    return r.json()
-  })
+  return postJson('/pipeline/sync/', {}).catch(rethrowPipelineConflict)
 }
 
-export function fetchPipelineStatus() {
-  return fetchJson('/pipeline/status/')
-}
-
-export function fetchVacancyDetail(sourceId) {
-  return fetchJson(`/vacancies/${sourceId}/detail/`)
-}
+export const fetchStandards = () => fetchJson('/standards/')
+export const fetchAttributeCatalog = () => fetchJson('/standards/catalog/')
+export const createStandard = (data) => postJson('/standards/create/', data)
+export const updateStandard = (id, data) => postJson(`/standards/${id}/`, data)
+export const deleteStandard = (id) => postJson(`/standards/${id}/delete/`)

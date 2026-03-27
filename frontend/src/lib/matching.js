@@ -1,10 +1,6 @@
 import {
-  Briefcase,
-  FileText,
-  GraduationCap,
-  Code,
-  Languages,
-  BookOpen,
+  Briefcase, FileText, GraduationCap, Code,
+  Languages, BookOpen,
 } from 'lucide-react'
 
 export const SECTION_CONFIG = {
@@ -17,19 +13,28 @@ export const SECTION_CONFIG = {
   general: { l: 'General', icon: FileText, c: 'text-steel-400', bg: 'bg-steel-50' },
 }
 
-export function scoreTextClass(s) {
-  return s >= 70 ? 'text-emerald-600' : s >= 50 ? 'text-amber-500' : 'text-red-500'
+export function scoreColor(s) {
+  return s >= 70 ? 'text-emerald-600' : s >= 45 ? 'text-amber-500' : 'text-red-500'
 }
 
-export function scoreBarClass(s) {
-  return s >= 70 ? 'bg-emerald-500' : s >= 50 ? 'bg-amber-400' : 'bg-red-400'
+export function scoreBar(s) {
+  return s >= 70 ? 'bg-emerald-500' : s >= 45 ? 'bg-amber-400' : 'bg-red-400'
 }
 
 export function normalizeWeights(raw) {
   const entries = Object.entries(raw)
   const sum = entries.reduce((a, [, v]) => a + v, 0)
   if (sum <= 0) return raw
-  const normalized = {}
-  for (const [k, v] of entries) normalized[k] = Math.round((v / sum) * 1000) / 1000
-  return normalized
+  const out = {}
+  for (const [k, v] of entries) out[k] = Math.round((v / sum) * 1000) / 1000
+  return out
+}
+
+export const SECTION_LABELS = {
+  education: 'Educación',
+  experience: 'Experiencia y Responsabilidades',
+  skills: 'Software y Herramientas',
+  languages: 'Idiomas',
+  certifications: 'Capacitación',
+  general: 'Adicionales',
 }

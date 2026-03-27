@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import DashboardPage from './pages/DashboardPage'
 import MatchingPage from './pages/MatchingPage'
 import VacancyDetailPage from './pages/VacancyDetailPage'
+import StandardsPage from './pages/StandardsPage'
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/matching" element={<MatchingPage />} />
             <Route path="/vacancy/:sourceId" element={<VacancyDetailPage />} />
+            <Route path="/standards" element={<StandardsPage />} />
           </Route>
         </Routes>
       </PipelineProvider>
