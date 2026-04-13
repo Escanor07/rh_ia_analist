@@ -73,8 +73,28 @@ def run_matching(request, source_id):
     standards = load_active_standards()
     t0 = time.time()
 
+    same_sucursal = bool(body.get("same_sucursal", False))
+    allowed_doc_ids: set[int] | None = None
+    if same_sucursal and vacancy.sucursal_id:
+        try:
+            rows = MySQLClient().fetch_all(
+                "SELECT id FROM gestor_rh_vacante WHERE sucursal_id = %s",
+                (vacancy.sucursal_id,),
+            )
+            all_suc_vacante_ids = {r["id"] for r in rows}
+        except Exception:
+            all_suc_vacante_ids = set()
+
+        if all_suc_vacante_ids:
+            allowed_doc_ids = set(
+                CandidateDocument.objects.filter(
+                    source_vacante_id__in=all_suc_vacante_ids,
+                    status="processed",
+                ).values_list("id", flat=True)
+            )
+
     # First pass without standards
-    pipeline = MatchingPipeline(weights=weights)
+    pipeline = MatchingPipeline(weights=weights, allowed_document_ids=allowed_doc_ids)
     results = pipeline.match_vacancy(vacancy, top_n=top_n * 3)
 
     # Second pass with standards scores integrated
@@ -82,7 +102,7 @@ def run_matching(request, source_id):
     if standards and results:
         doc_ids_for_std = list({cs.document_id for cs in results})
         standards_scores = compute_standards_scores(standards, doc_ids_for_std)
-        pipeline = MatchingPipeline(weights=weights, standards_score_by_doc=standards_scores)
+        pipeline = MatchingPipeline(weights=weights, standards_score_by_doc=standards_scores, allowed_document_ids=allowed_doc_ids)
         results = pipeline.match_vacancy(vacancy, top_n=top_n * 3)
 
     elapsed = round(time.time() - t0, 2)
@@ -177,16 +197,29 @@ def run_matching(request, source_id):
         c.pop("source_vacante_id", None)
         cst = c.get("candidate_status")
         if isinstance(cst, dict):
-            cst.pop("vacante_id", None)
+            if "vacante_id" in cst:
+                cst["status_vacante_id"] = cst.pop("vacante_id")
+
+    sucursal_nombre = None
+    try:
+        row = MySQLClient().fetch_one(
+            "SELECT nombre FROM zero_dawn.golabs_core_sucursal WHERE id = %s",
+            (vacancy.sucursal_id,),
+        )
+        sucursal_nombre = row.get("nombre") if row else None
+    except Exception:
+        pass
 
     return JsonResponse({
         "vacancy": {
             "source_id": vacancy.source_id, "profile_name": vacancy.profile_name,
             "tipo_vacante": vacancy.tipo_vacante, "sections": vacancy_sections_info,
+            "sucursal_id": vacancy.sucursal_id, "sucursal_nombre": sucursal_nombre,
         },
         "matching": {
             "candidates": candidates, "processing_time_seconds": elapsed,
             "has_standards": bool(standards),
+            "same_sucursal_applied": same_sucursal,
         },
     })
 
@@ -488,7 +521,7 @@ def _mysql_candidate_status_batch(candidate_ids):
     for r in rows:
         cid = int(r["cid"])
         sl = r.get("status_label") or ""
-        out[cid] = {"status_id": r.get("status_id"), "status_label": sl, "vacante_id": r.get("vacante_id")}
+        out[cid] = {"status_id": r.get("status_id"), "status_label": sl, "vacante_id": r.get("vacante_id"), "vacante_perfil": r.get("vacante_perfil") or ""}
     return out
 
 

@@ -14,8 +14,12 @@ class MatchingPipeline:
         top_k_full: int = 40,
         weights: dict[str, float] | None = None,
         standards_score_by_doc: dict[int, float] | None = None,
+        allowed_document_ids: set[int] | None = None,
     ):
-        self.searcher = ProfileSearcher(top_k=top_k_per_section)
+        self.searcher = ProfileSearcher(
+            top_k=top_k_per_section,
+            allowed_document_ids=allowed_document_ids,
+        )
         self.scorer = MatchScorer(weights=weights, standards_score_by_doc=standards_score_by_doc)
         self.top_k_full = top_k_full
 

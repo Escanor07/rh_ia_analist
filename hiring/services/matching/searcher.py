@@ -18,8 +18,9 @@ class ChunkMatch:
 
 
 class ProfileSearcher:
-    def __init__(self, top_k: int = 20):
+    def __init__(self, top_k: int = 20, allowed_document_ids: set[int] | None = None):
         self.top_k = top_k
+        self.allowed_document_ids = allowed_document_ids
 
     def search_by_section(
         self,
@@ -33,13 +34,16 @@ class ProfileSearcher:
         k = top_k or self.top_k
         target_types = self._get_candidate_section_types(section_type)
 
+        qs = CandidateChunk.objects.filter(
+            embedding__isnull=False,
+            document__status="processed",
+            section_type__in=target_types,
+        )
+        if self.allowed_document_ids is not None:
+            qs = qs.filter(document_id__in=self.allowed_document_ids)
+
         results = (
-            CandidateChunk.objects
-            .filter(
-                embedding__isnull=False,
-                document__status="processed",
-                section_type__in=target_types,
-            )
+            qs
             .select_related("document")
             .annotate(distance=CosineDistance("embedding", embedding))
             .order_by("distance")
@@ -58,12 +62,15 @@ class ProfileSearcher:
 
         k = top_k or self.top_k
 
+        qs = CandidateChunk.objects.filter(
+            embedding__isnull=False,
+            document__status="processed",
+        )
+        if self.allowed_document_ids is not None:
+            qs = qs.filter(document_id__in=self.allowed_document_ids)
+
         results = (
-            CandidateChunk.objects
-            .filter(
-                embedding__isnull=False,
-                document__status="processed",
-            )
+            qs
             .select_related("document")
             .annotate(distance=CosineDistance("embedding", embedding))
             .order_by("distance")
