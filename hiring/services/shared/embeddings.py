@@ -1,8 +1,7 @@
 from django.conf import settings
 from openai import OpenAI
 from typing import Any
-import tiktoken
-
+ 
 
 class EmbeddingService:
     def __init__(self):
@@ -10,22 +9,6 @@ class EmbeddingService:
         self.model = settings.OPENAI_EMBEDDING_MODEL
         self.dimensions = settings.OPENAI_EMBEDDING_DIMENSIONS
         self.batch_size = settings.EMBED_BATCH_SIZE
-        self.encoding = self._load_encoding(self.model)
-
-    def _load_encoding(self, model: str):
-        try:
-            return tiktoken.encoding_for_model(model)
-        except Exception:
-            return tiktoken.get_encoding("cl100k_base")
-
-    def count_tokens(self, text: str) -> int:
-        text = text or ""
-        if not text:
-            return 0
-        return len(self.encoding.encode(text))
-
-    def count_tokens_for_texts(self, texts: list[str]) -> int:
-        return sum(self.count_tokens(text) for text in texts)
 
     def embed_texts_with_usage(self, texts: list[str]) -> dict[str, Any]:
         cleaned = [(text or "").strip() for text in texts]

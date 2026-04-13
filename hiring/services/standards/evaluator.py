@@ -51,7 +51,6 @@ ATTRIBUTE_CATALOG = {
 
 @dataclass
 class StandardResult:
-    standard_id: int
     name: str
     standard_type: str
     eval_mode: str
@@ -158,7 +157,7 @@ def evaluate_candidate(
             passed = True
 
         results.append(StandardResult(
-            standard_id=std.id, name=std.name,
+            name=std.name,
             standard_type=std.standard_type, eval_mode=std.eval_mode,
             score_100=score_100, passed=passed, value=value, weight=std.weight,
         ))
