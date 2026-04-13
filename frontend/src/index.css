@@ -1,27 +1,35 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'DM Sans', system-ui, sans-serif;
-  --color-steel-50: #eef3f9;
-  --color-steel-100: #d5e0ee;
-  --color-steel-200: #adc0dd;
-  --color-steel-300: #7d9bc5;
-  --color-steel-400: #5479ad;
-  --color-steel-500: #3b5f91;
-  --color-steel-600: #2f4d77;
-  --color-steel-700: #243c5e;
-  --color-steel-800: #1a2d47;
-  --color-steel-900: #111e32;
-  --color-steel-950: #0a1321;
+  --color-steel-50: #f4f6f9;
+  --color-steel-100: #e8ecf2;
+  --color-steel-200: #cfd8e6;
+  --color-steel-300: #a8bad0;
+  --color-steel-400: #7a98b5;
+  --color-steel-500: #5c7d9e;
+  --color-steel-600: #476785;
+  --color-steel-700: #3b556d;
+  --color-steel-800: #334860;
+  --color-steel-900: #2d3e51;
+  --color-steel-950: #1b2737;
 }
 
-html { height: 100%; }
-body { min-height: 100%; margin: 0; font-family: var(--font-sans); -webkit-font-smoothing: antialiased; background: #f1f4f9; }
-#root { min-height: 100dvh; }
+* {
+  box-sizing: border-box;
+}
 
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Thin scrollbar */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #cfd8e6 transparent;
+}
 .scroll-thin::-webkit-scrollbar { width: 5px; height: 5px; }
 .scroll-thin::-webkit-scrollbar-track { background: transparent; }
-.scroll-thin::-webkit-scrollbar-thumb { background: #c5cdd8; border-radius: 10px; }
-@media (min-width: 1536px) {
-  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
-}
+.scroll-thin::-webkit-scrollbar-thumb { background: #cfd8e6; border-radius: 99px; }

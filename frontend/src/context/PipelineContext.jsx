@@ -8,8 +8,9 @@ export function PipelineProvider({ children }) {
   const [status, setStatus] = useState(null)
   const [polling, setPolling] = useState(false)
   const onFinishRef = useRef(null)
+  const clearTimerRef = useRef(null)
 
-  // Check on mount (page reload) — resume polling if backend is running
+  // On mount — resume polling if backend is already running
   useEffect(() => {
     fetchPipelineStatus().then(s => {
       setStatus(s)
@@ -29,13 +30,18 @@ export function PipelineProvider({ children }) {
             onFinishRef.current()
             onFinishRef.current = null
           }
+          clearTimerRef.current = setTimeout(() => setStatus(null), 3000)
         }
       }).catch(() => {})
     }, 3000)
     return () => clearInterval(id)
   }, [polling])
 
+  // Cleanup timer on unmount
+  useEffect(() => () => { if (clearTimerRef.current) clearTimeout(clearTimerRef.current) }, [])
+
   const startIngest = useCallback(async (onFinish) => {
+    if (clearTimerRef.current) { clearTimeout(clearTimerRef.current); clearTimerRef.current = null }
     await apiIngest()
     onFinishRef.current = onFinish || null
     setStatus({ running: true, task: 'ingest', processed: 0, total: 0, skipped: 0, failed: 0 })
@@ -43,15 +49,17 @@ export function PipelineProvider({ children }) {
   }, [])
 
   const startSync = useCallback(async (onFinish) => {
+    if (clearTimerRef.current) { clearTimeout(clearTimerRef.current); clearTimerRef.current = null }
     await apiSync()
     onFinishRef.current = onFinish || null
     setStatus({ running: true, task: 'sync_vacancies', processed: 0, total: 0, skipped: 0, failed: 0 })
     setPolling(true)
   }, [])
 
-  // Progress: processed + failed out of total. If total=0 but running, show indeterminate
-  const done = (status?.processed || 0) + (status?.failed || 0)
-  const progress = status?.total > 0 ? Math.round(done / status.total * 100) : (status?.running ? -1 : 0)
+  const done     = (status?.processed || 0) + (status?.failed || 0)
+  const progress = status?.total > 0
+    ? Math.round(done / status.total * 100)
+    : (status?.running ? -1 : 0)
 
   return (
     <Ctx.Provider value={{ status, progress, startIngest, startSync }}>
