@@ -13,8 +13,10 @@ export function PipelineProvider({ children }) {
   // On mount — resume polling if backend is already running
   useEffect(() => {
     fetchPipelineStatus().then(s => {
-      setStatus(s)
-      if (s.running) setPolling(true)
+      if (s.running) {
+        setStatus(s)
+        setPolling(true)
+      }
     }).catch(() => {})
   }, [])
 

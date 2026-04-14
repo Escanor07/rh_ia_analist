@@ -13,6 +13,16 @@ from hiring.services.shared.cv_classifier import CVClassifier
 from hiring.services.shared.embeddings import EmbeddingService
 
 
+def _sanitize_json(obj):
+    if isinstance(obj, str):
+        return obj.replace('\u0000', '').replace('\x00', '')
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json(v) for v in obj]
+    return obj
+
+
 class CandidateIngestionPipeline:
     def __init__(self) -> None:
         self.storage = S3StorageService()
@@ -49,7 +59,7 @@ class CandidateIngestionPipeline:
                 document.source_vacante_id = record.vacante_id
                 document.status = CandidateDocument.Status.PENDING
                 document.last_error = ""
-                document.processing_meta_json = {
+                document.processing_meta_json = _sanitize_json({
                     "source": {
                         "doc_id": record.doc_id,
                         "candidate_id": record.candidate_id,
@@ -59,7 +69,7 @@ class CandidateIngestionPipeline:
                     "quality": classification.quality,
                     "attributes": classification.attributes,
                     "llm_usage": classification.llm_usage,
-                }
+                })
                 document.save()
 
                 document.chunks.all().delete()
@@ -70,7 +80,7 @@ class CandidateIngestionPipeline:
                         document=document,
                         chunk_index=idx,
                         section_type=payload.section_type,
-                        content=payload.content,
+                        content=_sanitize_json(payload.content),
                     )
                     for idx, payload in enumerate(chunk_payloads)
                 ]
