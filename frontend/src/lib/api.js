@@ -1,7 +1,17 @@
 const API = '/api'
 
 async function fetchJson(path, options = {}) {
-  const response = await fetch(`${API}${path}`, options)
+  const token = localStorage.getItem('auth_token')
+  const headers = { ...(options.headers || {}) }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const response = await fetch(`${API}${path}`, { ...options, headers })
+  if (response.status === 401) {
+    window.dispatchEvent(new Event('auth:logout'))
+    const err = new Error('Sesión expirada')
+    err.status = 401
+    throw err
+  }
   if (!response.ok) {
     const err = new Error(response.statusText || 'Error de red')
     err.status = response.status
@@ -16,6 +26,17 @@ function postJson(path, body = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+export async function loginUser(username, password) {
+  const response = await fetch(`${API}/auth/login/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || 'Error de autenticación')
+  return data
 }
 
 function rethrowConflict(e) {

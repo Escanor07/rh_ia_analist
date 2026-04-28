@@ -1,0 +1,34 @@
+# Servicios containerizados: backend (Django), frontend (nginx)
+# Servicios externos (no containerizados): RDS PostgreSQL, MySQL cliente, AWS S3, OpenAI API
+#
+# IMPORTANTE: en tu .env establece DB_HOST con el endpoint del RDS
+
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_DEBUG: "False"
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - model_cache:/root/.cache  # persiste modelos Docling/HuggingFace entre reinicios
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8079:80"
+
+volumes:
+  model_cache:

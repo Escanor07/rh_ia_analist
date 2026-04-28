@@ -38,3 +38,10 @@ frontend/.vite/
 
 # Logs
 *.log
+
+# Secrets / keys
+*.pem
+*.key
+
+# init-db: solo usado por container local, no aplica con RDS
+init-db/

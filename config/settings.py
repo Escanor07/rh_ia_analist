@@ -50,8 +50,19 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
+    }, 'auth_db': {
+        "ENGINE": "django.db.backends.mysql",
+        "HOST": os.getenv("DB_HOST_ZD", "localhost"),
+        "NAME": os.getenv("DB_NAME_ZD", ""),
+        "USER": os.getenv("DB_USER_ZD", ""),
+        "PASSWORD": os.getenv("DB_PASSWORD_ZD", ""),
+        "PORT": os.getenv("DB_PORT_ZD", "3306"),
+        'CONN_MAX_AGE': 60,
+        "OPTIONS": { "sql_mode": "traditional", },
     }
 }
+
+DATABASE_ROUTERS = ['config.routers.AuthRouter']  
 
 TIME_ZONE = 'America/Costa_Rica'
 USE_TZ = True

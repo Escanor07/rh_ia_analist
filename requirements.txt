@@ -271,6 +271,8 @@ pygments==2.19.2
     # via
     #   mpire
     #   rich
+pyjwt==2.9.0
+    # via -r requirements.in
 pylatexenc==2.10
     # via docling
 pypdfium2==5.5.0

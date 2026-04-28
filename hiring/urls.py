@@ -1,7 +1,8 @@
 from django.urls import path
-from hiring import views
+from hiring import auth, views
 
 urlpatterns = [
+    path("api/auth/login/", auth.login),
     path("health/", views.health),
     path("api/vacancies/", views.list_vacancies),
     path("api/vacancies/<int:source_id>/match/", views.run_matching),

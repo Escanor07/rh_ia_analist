@@ -161,6 +161,8 @@ def run_matching(request, source_id):
             seen[key] = entry
 
     candidates = sorted(seen.values(), key=lambda c: (c["applied_to_vacancy"], c["score"]), reverse=True)[:top_n]
+    print(f"Total candidates after filtering and deduplication: {len(candidates)}")
+    print(candidates[0])
     for i, c in enumerate(candidates, 1):
         c["rank"] = i
 
@@ -306,12 +308,12 @@ def vacancy_detail(request, source_id):
         return JsonResponse({"error": "Vacante no encontrada"}, status=404)
 
     candidates = db.fetch_all("""
-        SELECT vc.id, vc.nombre, vc.correo, vc.status_id,
+        SELECT vc.id, CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name) AS nombre, vc.correo, vc.status_id,
                COALESCE(cs.descripcion,'') AS status_label
-        FROM gestor_rh_vacante_candidato vc
+        FROM gestor_rh_candidate vc
         LEFT JOIN gestor_rh_candidato_status cs ON cs.id = vc.status_id
         WHERE vc.vacante_id = %s
-        ORDER BY vc.status_id, vc.nombre
+        ORDER BY vc.status_id, nombre
     """, (source_id,))
 
     by_status, descartados_count = {}, 0
@@ -507,7 +509,7 @@ def _mysql_candidate_status_batch(candidate_ids):
     sql = (
         "SELECT vc.id AS cid, vc.status_id, COALESCE(cs.descripcion,'') AS status_label, "
         "vc.vacante_id, COALESCE(pp.nombre,'') AS vacante_perfil "
-        "FROM gestor_rh_vacante_candidato vc "
+        "FROM gestor_rh_candidate vc "
         "LEFT JOIN gestor_rh_candidato_status cs ON cs.id=vc.status_id "
         "LEFT JOIN gestor_rh_vacante v ON v.id=vc.vacante_id "
         "LEFT JOIN gestor_rh_perfil_puesto pp ON pp.id=v.perfil_puesto_id "

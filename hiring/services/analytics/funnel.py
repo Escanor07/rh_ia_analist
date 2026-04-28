@@ -52,11 +52,11 @@ class FunnelAnalyticsService:
         with self.db.scoped_queries() as s:
             totals = s.fetch_one("""
                 SELECT
-                    (SELECT COUNT(*) FROM gestor_rh_vacante_candidato vc
+                    (SELECT COUNT(*) FROM gestor_rh_candidate vc
                         INNER JOIN gestor_rh_vacante v ON v.id=vc.vacante_id WHERE v.fecha_solicitud >= %s) AS candidatos,
-                    (SELECT COUNT(*) FROM gestor_rh_vacante_candidato vc
+                    (SELECT COUNT(*) FROM gestor_rh_candidate vc
                         INNER JOIN gestor_rh_vacante v ON v.id=vc.vacante_id WHERE v.fecha_solicitud >= %s AND vc.status_id=5) AS descartados,
-                    (SELECT COUNT(*) FROM gestor_rh_vacante_candidato vc
+                    (SELECT COUNT(*) FROM gestor_rh_candidate vc
                         INNER JOIN gestor_rh_vacante v ON v.id=vc.vacante_id WHERE v.fecha_solicitud >= %s AND vc.status_id=8) AS contratados
             """, (self.cutoff,) * 3) or {}
             tc, th, td = totals.get("candidatos", 0), totals.get("contratados", 0), totals.get("descartados", 0)
@@ -77,8 +77,8 @@ class FunnelAnalyticsService:
     def _candidate_funnel(self, s) -> dict:
         rows = s.fetch_all(f"""
             SELECT h.candidato_id, h.accion
-            FROM gestor_rh_candidato_historial h
-            INNER JOIN gestor_rh_vacante_candidato vc ON vc.id = h.candidato_id
+            FROM gestor_rh_candidate_history h
+            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidato_id
             INNER JOIN gestor_rh_vacante v ON v.id = vc.vacante_id
             WHERE v.fecha_solicitud >= %s
               AND h.accion IN ({_FUNNEL_ACTIONS_SQL_IN})
@@ -162,8 +162,8 @@ class FunnelAnalyticsService:
             SELECT v.id AS vid, COALESCE(pp.nombre,'') AS perfil,
                    COALESCE(sv.descripcion,'') AS status, v.status_id,
                    v.fecha_solicitud,
-                   (SELECT COUNT(*) FROM gestor_rh_vacante_candidato vc WHERE vc.vacante_id=v.id) AS candidatos,
-                   (SELECT COUNT(*) FROM gestor_rh_vacante_candidato vc WHERE vc.vacante_id=v.id AND vc.status_id=5) AS descartados
+                   (SELECT COUNT(*) FROM gestor_rh_candidate vc WHERE vc.vacante_id=v.id) AS candidatos,
+                   (SELECT COUNT(*) FROM gestor_rh_candidate vc WHERE vc.vacante_id=v.id AND vc.status_id=5) AS descartados
             FROM gestor_rh_vacante v
             LEFT JOIN gestor_rh_perfil_puesto pp ON pp.id=v.perfil_puesto_id
             LEFT JOIN gestor_rh_status_vacante sv ON sv.id=v.status_id
@@ -178,8 +178,8 @@ class FunnelAnalyticsService:
     def _candidate_sla(self, s) -> dict:
         rows = s.fetch_all(f"""
             SELECT h.candidato_id, h.accion, h.fecha
-            FROM gestor_rh_candidato_historial h
-            INNER JOIN gestor_rh_vacante_candidato vc ON vc.id = h.candidato_id
+            FROM gestor_rh_candidate_history h
+            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidato_id
             INNER JOIN gestor_rh_vacante v ON v.id = vc.vacante_id
             WHERE v.fecha_solicitud >= %s
               AND h.accion IN ({_FUNNEL_ACTIONS_SQL_IN})
@@ -248,14 +248,17 @@ class FunnelAnalyticsService:
         }
 
     def get_vacancy_candidate_pipeline(self, vacancy_id: int) -> dict:
-        rows = self.db.fetch_all("""
+        rows = self.db.fetch_all(
+            """
             SELECT h.candidato_id, h.accion, h.descripcion, h.fecha,
-                   vc.nombre AS candidato_nombre
-            FROM gestor_rh_candidato_historial h
-            INNER JOIN gestor_rh_vacante_candidato vc ON vc.id = h.candidato_id
+                   COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name), '') AS candidato_nombre
+            FROM gestor_rh_candidate_history h
+            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidato_id
             WHERE vc.vacante_id = %s
             ORDER BY h.fecha ASC
-        """, (vacancy_id,))
+        """,
+            (vacancy_id,),
+        )
 
         by_candidate: dict[int, dict] = {}
         for r in rows:
