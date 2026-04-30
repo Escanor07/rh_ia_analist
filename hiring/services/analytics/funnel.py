@@ -76,19 +76,19 @@ class FunnelAnalyticsService:
 
     def _candidate_funnel(self, s) -> dict:
         rows = s.fetch_all(f"""
-            SELECT h.candidato_id, h.accion
+            SELECT h.candidate_id, h.action
             FROM gestor_rh_candidate_history h
-            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidato_id
+            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidate_id
             INNER JOIN gestor_rh_vacante v ON v.id = vc.vacante_id
             WHERE v.fecha_solicitud >= %s
-              AND h.accion IN ({_FUNNEL_ACTIONS_SQL_IN})
+              AND h.action IN ({_FUNNEL_ACTIONS_SQL_IN})
         """, (self.cutoff, *FUNNEL_HISTORY_ACTIONS))
 
         # Count unique candidates per stage
         stage_candidates: dict[str, set] = {}
         for r in rows:
-            action = r["accion"]
-            cid = r["candidato_id"]
+            action = r["action"]
+            cid = r["candidate_id"]
             stage_candidates.setdefault(action, set()).add(cid)
 
         all_cids = set().union(*stage_candidates.values()) if stage_candidates else set()
@@ -120,13 +120,13 @@ class FunnelAnalyticsService:
 
     def _vacancy_sla(self, s) -> dict:
         rows = s.fetch_all("""
-            SELECT fecha_solicitud, fecha_autorizacion, fecha_rh
+            SELECT fecha_solicitud, authorized_at, fecha_rh
             FROM gestor_rh_vacante WHERE fecha_solicitud >= %s
         """, (self.cutoff,))
         sa, ar, sr = [], [], []
         for r in rows:
-            d1 = days_between(r.get("fecha_solicitud"), r.get("fecha_autorizacion"))
-            d2 = days_between(r.get("fecha_autorizacion"), r.get("fecha_rh"))
+            d1 = days_between(r.get("fecha_solicitud"), r.get("authorized_at"))
+            d2 = days_between(r.get("authorized_at"), r.get("fecha_rh"))
             d3 = days_between(r.get("fecha_solicitud"), r.get("fecha_rh"))
             if d1 is not None and d1 >= 0:
                 sa.append(d1)
@@ -141,18 +141,21 @@ class FunnelAnalyticsService:
         }
 
     def _discard_reasons(self, s, limit: int) -> dict:
-        rows = s.fetch_all("""
-            SELECT h.descripcion
-            FROM gestor_rh_vacante_historial h
+        rows = s.fetch_all(
+            """
+            SELECT h.description
+            FROM gestor_rh_vacante_history h
             LEFT JOIN gestor_rh_vacante v ON v.id=h.vacante_id
-            WHERE h.accion='Actualización de candidato' AND h.descripcion LIKE '%%descarto%%'
+            WHERE h.action='Actualización de candidato' AND h.description LIKE '%%descarto%%'
               AND v.fecha_solicitud >= %s
-            ORDER BY h.fecha DESC LIMIT %s
-        """, (self.cutoff, limit))
+            ORDER BY h.created_at DESC LIMIT %s
+        """,
+            (self.cutoff, limit),
+        )
         cats = {}
         for r in rows:
-            parts = r.get("descripcion", "").split(" por ", 1)
-            reason = parts[1].strip() if len(parts) > 1 else r.get("descripcion", "")
+            parts = r.get("description", "").split(" por ", 1)
+            reason = parts[1].strip() if len(parts) > 1 else r.get("description", "")
             cat = _categorize(reason)
             cats[cat] = cats.get(cat, 0) + 1
         return {"by_category": cats}
@@ -160,13 +163,13 @@ class FunnelAnalyticsService:
     def _get_all_vacancies(self, s) -> list:
         rows = s.fetch_all("""
             SELECT v.id AS vid, COALESCE(pp.nombre,'') AS perfil,
-                   COALESCE(sv.descripcion,'') AS status, v.status_id,
+                   COALESCE(sv.description,'') AS status, v.status_id,
                    v.fecha_solicitud,
                    (SELECT COUNT(*) FROM gestor_rh_candidate vc WHERE vc.vacante_id=v.id) AS candidatos,
                    (SELECT COUNT(*) FROM gestor_rh_candidate vc WHERE vc.vacante_id=v.id AND vc.status_id=5) AS descartados
             FROM gestor_rh_vacante v
             LEFT JOIN gestor_rh_perfil_puesto pp ON pp.id=v.perfil_puesto_id
-            LEFT JOIN gestor_rh_status_vacante sv ON sv.id=v.status_id
+            LEFT JOIN gestor_rh_vacante_status sv ON sv.id=v.status_id
             WHERE v.status_id != 10 AND v.fecha_solicitud >= %s
             ORDER BY v.fecha_solicitud DESC
         """, (self.cutoff,))
@@ -177,20 +180,20 @@ class FunnelAnalyticsService:
 
     def _candidate_sla(self, s) -> dict:
         rows = s.fetch_all(f"""
-            SELECT h.candidato_id, h.accion, h.fecha
+            SELECT h.candidate_id, h.action, h.created_at
             FROM gestor_rh_candidate_history h
-            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidato_id
+            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidate_id
             INNER JOIN gestor_rh_vacante v ON v.id = vc.vacante_id
             WHERE v.fecha_solicitud >= %s
-              AND h.accion IN ({_FUNNEL_ACTIONS_SQL_IN})
-            ORDER BY h.candidato_id, h.fecha
+              AND h.action IN ({_FUNNEL_ACTIONS_SQL_IN})
+            ORDER BY h.candidate_id, h.created_at
         """, (self.cutoff, *FUNNEL_HISTORY_ACTIONS))
 
         # Group actions by candidate
         by_candidate: dict[int, list[tuple[str, object]]] = {}
         for r in rows:
-            cid = r["candidato_id"]
-            by_candidate.setdefault(cid, []).append((r["accion"], r["fecha"]))
+            cid = r["candidate_id"]
+            by_candidate.setdefault(cid, []).append((r["action"], r["fecha"]))
 
         # Compute transition times
         transitions: dict[str, list[float]] = {}
@@ -250,27 +253,27 @@ class FunnelAnalyticsService:
     def get_vacancy_candidate_pipeline(self, vacancy_id: int) -> dict:
         rows = self.db.fetch_all(
             """
-            SELECT h.candidato_id, h.accion, h.descripcion, h.fecha,
+            SELECT h.candidate_id, h.action, h.description, h.created_at,
                    COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name), '') AS candidato_nombre
             FROM gestor_rh_candidate_history h
-            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidato_id
+            INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidate_id
             WHERE vc.vacante_id = %s
-            ORDER BY h.fecha ASC
+            ORDER BY h.created_at ASC
         """,
             (vacancy_id,),
         )
 
         by_candidate: dict[int, dict] = {}
         for r in rows:
-            cid = r["candidato_id"]
+            cid = r["candidate_id"]
             if cid not in by_candidate:
                 by_candidate[cid] = {
-                    "candidato_id": cid,
+                    "candidate_id": cid,
                     "nombre": r.get("candidato_nombre", ""),
                     "events": [],
                 }
             by_candidate[cid]["events"].append({
-                "accion": r["accion"],
+                "action": r["action"],
                 "descripcion": r.get("descripcion", ""),
                 "fecha": str(r["fecha"])[:16] if r.get("fecha") else None,
             })
@@ -291,9 +294,9 @@ class FunnelAnalyticsService:
                     except (ValueError, TypeError):
                         pass
 
-            current_stage = events[-1]["accion"] if events else "—"
+            current_stage = events[-1]["action"] if events else "—"
             candidates.append({
-                "candidato_id": cid,
+                "candidate_id": cid,
                 "nombre": data["nombre"],
                 "current_stage": STAGE_LABELS.get(current_stage, current_stage),
                 "total_events": len(events),
@@ -307,7 +310,7 @@ class FunnelAnalyticsService:
         for c in candidates:
             seen = set()
             for e in c["events"]:
-                label = STAGE_LABELS.get(e["accion"], e["accion"])
+                label = STAGE_LABELS.get(e["action"], e["action"])
                 seen.add(label)
             for label in seen:
                 stage_counts[label] = stage_counts.get(label, 0) + 1

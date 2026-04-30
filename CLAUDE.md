@@ -43,7 +43,7 @@ No test suite or linter config exists in this repo.
 
 Two read-only external sources feed into the system:
 - **Client MySQL** (`gestor_rh_*` tables, `zero_dawn.*` views) — vacancies, job profiles, candidate records, stage history, branch lookups
-- **AWS S3** — CV PDF files referenced by `gestor_rh_candidato_documento.url_documento`
+- **AWS S3** — CV PDF files referenced by `gestor_rh_candidate_file.s3_url`
 
 The module never writes to these external systems. It stores derived data (embeddings, match results, standards) in its own PostgreSQL database with the pgvector extension.
 
@@ -92,9 +92,10 @@ Three modes: `score` (affects ranking), `filter` (UI-only gate), `informational`
 ### Frontend Architecture (`frontend/src/`)
 
 - `App.jsx` defines routes; `layout/AppShell.jsx` wraps all pages with `Sidebar` + `PipelineStatusBar`
+- `context/AuthContext.jsx` manages JWT token (stored in `localStorage` as `auth_token`); dispatches `auth:logout` event on 401
 - `context/PipelineContext.jsx` polls `GET /api/pipeline/status/` every 3 seconds while a job is running
-- `lib/api.js` contains all fetch calls — add new API calls here
-- Pages are feature-organized under `pages/`: `dashboard/`, `matching/`, `standards/`, `vacancy-detail/`
+- `lib/api.js` contains all fetch calls — add new API calls here; automatically attaches `Authorization: Bearer <token>` header
+- Pages are feature-organized under `pages/`: `login/`, `dashboard/`, `matching/`, `standards/`, `vacancy-detail/`
 
 ### Key Models (`hiring/models.py`)
 
@@ -136,4 +137,6 @@ frontend/        — React app (separate process)
 - Spanish naming throughout: `sucursal`, `vacante`, `candidato`, `perfil_puesto` — match existing naming when adding code
 - All business logic lives in `hiring/services/`; `views.py` should stay thin
 - The module is strictly read-only with respect to the client MySQL and S3 — never add write operations there
+- All endpoints require JWT auth except `GET /health/` and `POST /api/auth/login/`; use `@jwt_required` decorator from `hiring/auth.py`
+- Client MySQL table names follow English naming: `gestor_rh_candidate`, `gestor_rh_candidate_file`, `gestor_rh_candidate_status`, `gestor_rh_candidate_history`, `gestor_rh_vacante_history`
 - `ARCHITECTURE.md` at the repo root contains deeper technical reference for the ingestion and matching pipelines

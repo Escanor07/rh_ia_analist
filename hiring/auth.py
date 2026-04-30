@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 
 import jwt
 from django.conf import settings
@@ -35,6 +36,24 @@ def _issue_token(user: dict) -> str:
         "exp": now + timedelta(hours=_TOKEN_LIFETIME_HOURS),
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+
+
+def jwt_required(view_func):
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.removeprefix("Bearer ").strip()
+        if not token:
+            return JsonResponse({"error": "Token de autenticación requerido"}, status=401)
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+            request.user_payload = payload
+        except jwt.ExpiredSignatureError:
+            return JsonResponse({"error": "Token expirado"}, status=401)
+        except jwt.InvalidTokenError:
+            return JsonResponse({"error": "Token inválido"}, status=401)
+        return view_func(request, *args, **kwargs)
+    return wrapper
 
 
 @require_POST

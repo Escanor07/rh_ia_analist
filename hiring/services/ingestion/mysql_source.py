@@ -20,7 +20,7 @@ class MySQLSourceService:
     BASE_QUERY = """
         SELECT
             d.id AS doc_id,
-            d.candidate_id as candidato_id,
+            d.candidate_id,
             d.created_by_id as colaborador_id,
             d.created_at AS upload_date,
             d.s3_url AS source_key,
@@ -65,7 +65,7 @@ class MySQLSourceService:
     def _map_row(self, row: dict) -> SourceCVRecord:
         return SourceCVRecord(
             doc_id=row["doc_id"],
-            candidate_id=row["candidato_id"],
+            candidate_id=row["candidate_id"],
             collaborator_id=row["colaborador_id"],
             vacante_id=row.get("vacante_id"),
             candidate_name=row["candidate_name"],

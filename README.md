@@ -71,9 +71,12 @@ python manage.py sync_vacancies
 
 ## API Reference
 
+All endpoints except `/health/` and `/api/auth/login/` require `Authorization: Bearer <token>`.
+
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health/` | Health check |
+| `POST` | `/api/auth/login/` | Login — returns JWT token (8h lifetime) |
+| `GET` | `/health/` | Health check (public) |
 | `GET` | `/api/vacancies/` | List synced vacancies |
 | `POST` | `/api/vacancies/<id>/match/` | Run matching — see body below |
 | `GET` | `/api/vacancies/<id>/detail/` | Vacancy detail with pipeline |
@@ -118,13 +121,15 @@ This module reads (never writes) from two external systems:
 - `gestor_rh_vacante` — vacancies
 - `gestor_rh_perfil_puesto` — job profiles
 - `gestor_rh_vacante_caracteristica` — job requirements
-- `gestor_rh_candidato_documento` — CV document records with S3 keys
-- `gestor_rh_vacante_candidato` — candidate-to-vacancy associations
-- `gestor_rh_candidato_status` — candidate status labels
-- `gestor_rh_candidato_historial` — candidate stage history
+- `gestor_rh_vacante_history` — vacancy change history
+- `gestor_rh_candidate` — candidates
+- `gestor_rh_candidate_file` — CV document records with S3 keys
+- `gestor_rh_candidate_status` — candidate status labels
+- `gestor_rh_candidate_history` — candidate stage history
+- `gestor_rh_collaborator_termination` — turnover records
 
 **Client MySQL (`zero_dawn.*` views):**
 - `zero_dawn.golabs_core_sucursal` — branch name/location lookup
 - `zero_dawn.golabs_colaborador` — active employee records (reserved for future use)
 
-**AWS S3:** CV PDF files referenced by `gestor_rh_candidato_documento.url_documento`
+**AWS S3:** CV PDF files referenced by `gestor_rh_candidate_file.s3_url`

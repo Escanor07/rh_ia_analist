@@ -7,7 +7,7 @@ This document explains every layer of the system for the next developer picking 
 ## 1. Ingestion Pipeline
 
 ```
-gestor_rh_candidato_documento (MySQL)
+gestor_rh_candidate_file (MySQL)
     ↓ source key (S3 path)
 S3 → download PDF to /tmp
     ↓
@@ -153,10 +153,10 @@ Analytics results are cached in Django's cache backend (default: memcache/local-
 `FunnelAnalyticsService.get_all()` returns:
 
 - `totals` — candidatos, contratados, descartados, conversion_rate, drop_off_rate
-- `candidate_funnel` — stage-by-stage counts from `gestor_rh_candidato_historial`
+- `candidate_funnel` — stage-by-stage counts from `gestor_rh_candidate_history`
 - `vacancy_sla` — days Sol→Aut, Aut→RRHH, total (from vacancy date fields)
 - `candidate_sla` — avg transition time between stages per candidate
-- `discard_reasons` — categorized from `gestor_rh_vacante_historial` descriptions
+- `discard_reasons` — categorized from `gestor_rh_vacante_history` descriptions
 - `turnover` — from `gestor_rh_collaborator_termination`
 - `all_vacancies` — table data for the dashboard vacancies list
 
@@ -167,10 +167,11 @@ Analytics results are cached in Django's cache backend (default: memcache/local-
 ```
 frontend/src/
 ├── layout/          — AppShell, Sidebar, PipelineStatusBar
-├── context/         — PipelineContext (pipeline job state + polling)
+├── context/         — PipelineContext (pipeline job state + polling), AuthContext (JWT token)
 ├── lib/             — api.js (all fetch calls), matching.js (section config, score colors)
 ├── components/      — shared: MetricCard, SectionCard, PageLoader, EmptyState
 └── pages/
+    ├── login/
     ├── dashboard/
     ├── matching/
     ├── standards/

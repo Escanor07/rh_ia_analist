@@ -9,6 +9,7 @@ from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
+from hiring.auth import jwt_required
 from hiring.models import CandidateChunk, CandidateDocument, GlobalStandard, MatchRun, MatchRunCandidate, Vacancy
 from hiring.services.analytics.dates import days_between
 from hiring.services.analytics.funnel import FunnelAnalyticsService
@@ -45,6 +46,7 @@ def health(request):
     return JsonResponse({"status": "ok", "postgres": db_status, "pgvector": pgvector})
 
 
+@jwt_required
 @require_GET
 def list_vacancies(request):
     qs = Vacancy.objects.order_by("-fecha_solicitud")
@@ -55,6 +57,7 @@ def list_vacancies(request):
     ]})
 
 
+@jwt_required
 @require_POST
 def run_matching(request, source_id):
     try:
@@ -161,8 +164,6 @@ def run_matching(request, source_id):
             seen[key] = entry
 
     candidates = sorted(seen.values(), key=lambda c: (c["applied_to_vacancy"], c["score"]), reverse=True)[:top_n]
-    print(f"Total candidates after filtering and deduplication: {len(candidates)}")
-    print(candidates[0])
     for i, c in enumerate(candidates, 1):
         c["rank"] = i
 
@@ -226,17 +227,19 @@ def run_matching(request, source_id):
     })
 
 
+@jwt_required
 @require_GET
 def default_weights(request):
     return JsonResponse({"weights": DEFAULT_WEIGHTS})
 
 
+@jwt_required
 @require_GET
 def dashboard(request):
     try:
         row = MySQLClient().fetch_one(
             """
-            SELECT COUNT(*) AS total FROM gestor_rh_candidate_file
+            SELECT COUNT(*) AS total FROM gestor_rh_candidate_file d
             WHERE d.type_file_id = 1
               AND d.s3_url IS NOT NULL
               AND TRIM(d.s3_url) <> ''
@@ -270,13 +273,14 @@ def dashboard(request):
         MatchRun.objects.order_by("-executed_at")[:5]
         .values("id", "vacancy_name", "candidates_evaluated", "top_score")
     )
-
-    cache_key = f"hiring:dashboard_analytics:{settings.DATA_CUTOFF_DATE}"
-    analytics = cache.get(cache_key)
-    if analytics is None:
-        analytics = FunnelAnalyticsService().get_all()
+    try:
+        cache_key = f"hiring:dashboard_analytics:{settings.DATA_CUTOFF_DATE}"
+        analytics = cache.get(cache_key)
+        if analytics is None:
+            analytics = FunnelAnalyticsService().get_all()
         cache.set(cache_key, analytics, settings.DASHBOARD_ANALYTICS_CACHE_SECONDS)
-
+    except Exception as e:
+        print(f"Error fetching dashboard analytics: {e}")
     return JsonResponse({
         "pipeline": {
             "cvs_indexados_percent": index_rate,
@@ -294,27 +298,31 @@ def dashboard(request):
     })
 
 
+@jwt_required
 @require_GET
 def vacancy_detail(request, source_id):
     db = MySQLClient()
-    vacancy = db.fetch_one("""
-        SELECT v.id, v.status_id, v.tipo_vacante, v.fecha_solicitud, v.fecha_autorizacion, v.fecha_rh,
+    vacancy = db.fetch_one(
+        """
+        SELECT v.id, v.status_id, v.tipo_vacante, v.fecha_solicitud, v.authorized_at, v.fecha_rh,
                COALESCE(sv.descripcion,'') AS status_label,
                COALESCE(pp.nombre,'') AS perfil_nombre,
                COALESCE(pp.objetivo,'') AS perfil_objetivo
         FROM gestor_rh_vacante v
-        LEFT JOIN gestor_rh_status_vacante sv ON sv.id = v.status_id
+        LEFT JOIN gestor_rh_vacante_status sv ON sv.id = v.status_id
         LEFT JOIN gestor_rh_perfil_puesto pp ON pp.id = v.perfil_puesto_id
         WHERE v.id = %s
-    """, (source_id,))
+    """,
+        (source_id,),
+    )
     if not vacancy:
         return JsonResponse({"error": "Vacante no encontrada"}, status=404)
 
     candidates = db.fetch_all("""
         SELECT vc.id, CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name) AS nombre, vc.correo, vc.status_id,
-               COALESCE(cs.descripcion,'') AS status_label
+               COALESCE(cs.description,'') AS status_label
         FROM gestor_rh_candidate vc
-        LEFT JOIN gestor_rh_candidato_status cs ON cs.id = vc.status_id
+        LEFT JOIN gestor_rh_candidate_status cs ON cs.id = vc.status_id
         WHERE vc.vacante_id = %s
         ORDER BY vc.status_id, nombre
     """, (source_id,))
@@ -333,8 +341,8 @@ def vacancy_detail(request, source_id):
         (source_id,),
     )
     history = db.fetch_all("""
-        SELECT accion, descripcion, fecha FROM gestor_rh_vacante_historial
-        WHERE vacante_id = %s ORDER BY fecha DESC LIMIT 15
+        SELECT action, description, created_at FROM gestor_rh_vacante_history
+        WHERE vacante_id = %s ORDER BY created_at DESC LIMIT 15
     """, (source_id,))
 
     runs = list(
@@ -356,18 +364,19 @@ def vacancy_detail(request, source_id):
             "tipo": vacancy["tipo_vacante"],
             "status": vacancy["status_label"],
             "fecha_solicitud": str(vacancy["fecha_solicitud"]) if vacancy.get("fecha_solicitud") else None,
-            "dias_sol_aut": days_between(vacancy.get("fecha_solicitud"), vacancy.get("fecha_autorizacion")),
-            "dias_aut_rh": days_between(vacancy.get("fecha_autorizacion"), vacancy.get("fecha_rh")),
+            "dias_sol_aut": days_between(vacancy.get("fecha_solicitud"), vacancy.get("authorized_at")),
+            "dias_aut_rh": days_between(vacancy.get("authorized_at"), vacancy.get("fecha_rh")),
         },
         "candidates": {"total": len(candidates), "descartados_count": descartados_count, "by_status": by_status},
         "characteristics": [{"tipo": c["tipo"], "descripcion": c["descripcion"]} for c in characteristics],
-        "history": [{"accion": h["accion"], "descripcion": h.get("descripcion", ""),
-                     "fecha": str(h["fecha"])[:16] if h.get("fecha") else None} for h in history],
+        "history": [{"action": h["action"], "description": h.get("description", ""),
+                     "created_at": str(h["created_at"])[:16] if h.get("created_at") else None} for h in history],
         "matching_runs": runs,
         "candidate_pipeline": pipeline_data,
     })
 
 
+@jwt_required
 @require_POST
 def pipeline_ingest(request):
     body, err = _parse_json_body(request)
@@ -380,6 +389,7 @@ def pipeline_ingest(request):
     return JsonResponse({"status": "started", "task": "ingest"})
 
 
+@jwt_required
 @require_POST
 def pipeline_sync(request):
     if not start_sync_vacancies():
@@ -387,6 +397,7 @@ def pipeline_sync(request):
     return JsonResponse({"status": "started", "task": "sync_vacancies"})
 
 
+@jwt_required
 @require_GET
 def pipeline_status(request):
     return JsonResponse(get_status())
@@ -394,12 +405,14 @@ def pipeline_status(request):
 
 # --- Standards API ---
 
+@jwt_required
 @require_GET
 def list_standards(request):
     standards = GlobalStandard.objects.all()
     return JsonResponse({"standards": [_standard_to_dict(s) for s in standards]})
 
 
+@jwt_required
 @require_GET
 def attribute_catalog(request):
     catalog = get_attribute_catalog()
@@ -409,6 +422,7 @@ def attribute_catalog(request):
     }})
 
 
+@jwt_required
 @require_POST
 def create_standard(request):
     body, err = _parse_json_body(request)
@@ -447,6 +461,7 @@ def create_standard(request):
     return JsonResponse(_standard_to_dict(standard))
 
 
+@jwt_required
 @require_POST
 def update_standard(request, standard_id):
     try:
@@ -484,6 +499,7 @@ def update_standard(request, standard_id):
     return JsonResponse(_standard_to_dict(standard))
 
 
+@jwt_required
 @require_POST
 def delete_standard(request, standard_id):
     try:
@@ -510,10 +526,10 @@ def _mysql_candidate_status_batch(candidate_ids):
         return {}
     ph = ",".join(["%s"] * len(candidate_ids))
     sql = (
-        "SELECT vc.id AS cid, vc.status_id, COALESCE(cs.descripcion,'') AS status_label, "
+        "SELECT vc.id AS cid, vc.status_id, COALESCE(cs.description,'') AS status_label, "
         "vc.vacante_id, COALESCE(pp.nombre,'') AS vacante_perfil "
         "FROM gestor_rh_candidate vc "
-        "LEFT JOIN gestor_rh_candidato_status cs ON cs.id=vc.status_id "
+        "LEFT JOIN gestor_rh_candidate_status cs ON cs.id=vc.status_id "
         "LEFT JOIN gestor_rh_vacante v ON v.id=vc.vacante_id "
         "LEFT JOIN gestor_rh_perfil_puesto pp ON pp.id=v.perfil_puesto_id "
         f"WHERE vc.id IN ({ph})"
