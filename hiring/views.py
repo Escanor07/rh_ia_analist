@@ -234,13 +234,16 @@ def default_weights(request):
 @require_GET
 def dashboard(request):
     try:
-        row = MySQLClient().fetch_one("""
-            SELECT COUNT(*) AS total FROM gestor_rh_candidato_documento
-            WHERE nombre_documento = 'CV'
-              AND url_documento IS NOT NULL
-              AND TRIM(url_documento) <> ''
-              AND fecha >= %s
-        """, (settings.DATA_CUTOFF_DATE,))
+        row = MySQLClient().fetch_one(
+            """
+            SELECT COUNT(*) AS total FROM gestor_rh_candidate_file
+            WHERE d.type_file_id = 1
+              AND d.s3_url IS NOT NULL
+              AND TRIM(d.s3_url) <> ''
+              AND d.created_at >= %s
+        """,
+            (settings.DATA_CUTOFF_DATE,),
+        )
         total_cvs_source = row.get("total", 0) if row else 0
     except Exception:
         total_cvs_source = 0

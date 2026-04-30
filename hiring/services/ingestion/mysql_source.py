@@ -20,24 +20,24 @@ class MySQLSourceService:
     BASE_QUERY = """
         SELECT
             d.id AS doc_id,
-            d.candidato_id,
-            d.colaborador_id,
-            d.fecha AS upload_date,
-            d.url_documento AS source_key,
+            d.candidate_id as candidato_id,
+            d.created_by_id as colaborador_id,
+            d.created_at AS upload_date,
+            d.s3_url AS source_key,
             COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name), '') AS candidate_name,
             COALESCE(vc.correo, '') AS candidate_email,
             COALESCE(vc.celular, '') AS candidate_phone,
             vc.vacante_id
-        FROM gestor_rh_candidato_documento d
+        FROM gestor_rh_candidate_file d
         LEFT JOIN gestor_rh_candidate vc
-            ON vc.id = d.candidato_id
-        WHERE d.nombre_documento = 'CV'
-          AND d.url_documento IS NOT NULL
-          AND TRIM(d.url_documento) <> ''
-          AND d.fecha >= %s
+            ON vc.id = d.candidate_id
+        WHERE d.type_file_id = 1
+          AND d.s3_url IS NOT NULL
+          AND TRIM(d.s3_url) <> ''
+          AND d.created_at >= %s
     """
 
-    ORDER_BY = " ORDER BY d.fecha DESC, d.id DESC"
+    ORDER_BY = " ORDER BY d.created_at DESC, d.id DESC"
 
     def __init__(self):
         self.db = MySQLClient()

@@ -44,8 +44,8 @@ class Command(BaseCommand):
                 d.id AS doc_id,
                 COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name), '') AS candidate_name,
                 COALESCE(vc.correo, '') AS candidate_email
-            FROM gestor_rh_candidato_documento d
-            LEFT JOIN gestor_rh_candidate vc ON vc.id = d.candidato_id
+            FROM gestor_rh_candidate_file d
+            LEFT JOIN gestor_rh_candidate vc ON vc.id = d.candidate_id
             WHERE d.id IN ({ph})
             """,
             tuple(source_doc_ids),
