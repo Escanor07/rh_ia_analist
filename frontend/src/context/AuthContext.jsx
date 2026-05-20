@@ -39,13 +39,11 @@ export function AuthProvider({ children }) {
     setUser(userData)
   }, [])
 
-  // 401 desde cualquier llamada API cierra la sesión
   useEffect(() => {
     window.addEventListener('auth:logout', logout)
     return () => window.removeEventListener('auth:logout', logout)
   }, [logout])
 
-  // Expiración de sesión cada minuto
   useEffect(() => {
     if (!user) return
     const id = setInterval(() => {

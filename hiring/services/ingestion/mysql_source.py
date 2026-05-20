@@ -21,17 +21,18 @@ class MySQLSourceService:
         SELECT
             d.id AS doc_id,
             d.candidate_id,
-            d.created_by_id as colaborador_id,
+            d.created_by_id,
             d.created_at AS upload_date,
             d.s3_url AS source_key,
-            COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name), '') AS candidate_name,
+            COALESCE(vc.name, '') AS candidate_name,
             COALESCE(vc.correo, '') AS candidate_email,
             COALESCE(vc.celular, '') AS candidate_phone,
             vc.vacante_id
         FROM gestor_rh_candidate_file d
+        INNER JOIN gestor_rh_candidate_type_file tf ON tf.id = d.type_file_id
         LEFT JOIN gestor_rh_candidate vc
             ON vc.id = d.candidate_id
-        WHERE d.type_file_id = 1
+        WHERE tf.name = 'CV'
           AND d.s3_url IS NOT NULL
           AND TRIM(d.s3_url) <> ''
           AND d.created_at >= %s
@@ -66,7 +67,7 @@ class MySQLSourceService:
         return SourceCVRecord(
             doc_id=row["doc_id"],
             candidate_id=row["candidate_id"],
-            collaborator_id=row["colaborador_id"],
+            collaborator_id=row["created_by_id"],
             vacante_id=row.get("vacante_id"),
             candidate_name=row["candidate_name"],
             candidate_email=row["candidate_email"],

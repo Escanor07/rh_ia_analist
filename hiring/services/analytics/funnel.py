@@ -141,17 +141,14 @@ class FunnelAnalyticsService:
         }
 
     def _discard_reasons(self, s, limit: int) -> dict:
-        rows = s.fetch_all(
-            """
+        rows = s.fetch_all("""
             SELECT h.description
             FROM gestor_rh_vacante_history h
             LEFT JOIN gestor_rh_vacante v ON v.id=h.vacante_id
             WHERE h.action='Actualización de candidato' AND h.description LIKE '%%descarto%%'
               AND v.fecha_solicitud >= %s
             ORDER BY h.created_at DESC LIMIT %s
-        """,
-            (self.cutoff, limit),
-        )
+        """, (self.cutoff, limit))
         cats = {}
         for r in rows:
             parts = r.get("description", "").split(" por ", 1)
@@ -193,7 +190,7 @@ class FunnelAnalyticsService:
         by_candidate: dict[int, list[tuple[str, object]]] = {}
         for r in rows:
             cid = r["candidate_id"]
-            by_candidate.setdefault(cid, []).append((r["action"], r["fecha"]))
+            by_candidate.setdefault(cid, []).append((r["action"], r["created_at"]))
 
         # Compute transition times
         transitions: dict[str, list[float]] = {}
@@ -251,31 +248,28 @@ class FunnelAnalyticsService:
         }
 
     def get_vacancy_candidate_pipeline(self, vacancy_id: int) -> dict:
-        rows = self.db.fetch_all(
-            """
+        rows = self.db.fetch_all("""
             SELECT h.candidate_id, h.action, h.description, h.created_at,
-                   COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name), '') AS candidato_nombre
+                   vc.name AS candidato_nombre
             FROM gestor_rh_candidate_history h
             INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidate_id
             WHERE vc.vacante_id = %s
             ORDER BY h.created_at ASC
-        """,
-            (vacancy_id,),
-        )
+        """, (vacancy_id,))
 
         by_candidate: dict[int, dict] = {}
         for r in rows:
             cid = r["candidate_id"]
             if cid not in by_candidate:
                 by_candidate[cid] = {
-                    "candidate_id": cid,
+                    "candidato_id": cid,
                     "nombre": r.get("candidato_nombre", ""),
                     "events": [],
                 }
             by_candidate[cid]["events"].append({
-                "action": r["action"],
-                "descripcion": r.get("descripcion", ""),
-                "fecha": str(r["fecha"])[:16] if r.get("fecha") else None,
+                "accion": r["action"],
+                "descripcion": r.get("description", ""),
+                "fecha": str(r["created_at"])[:16] if r.get("created_at") else None,
             })
 
         # Compute SLA per candidate
@@ -294,9 +288,9 @@ class FunnelAnalyticsService:
                     except (ValueError, TypeError):
                         pass
 
-            current_stage = events[-1]["action"] if events else "—"
+            current_stage = events[-1]["accion"] if events else "—"
             candidates.append({
-                "candidate_id": cid,
+                "candidato_id": cid,
                 "nombre": data["nombre"],
                 "current_stage": STAGE_LABELS.get(current_stage, current_stage),
                 "total_events": len(events),
@@ -310,7 +304,7 @@ class FunnelAnalyticsService:
         for c in candidates:
             seen = set()
             for e in c["events"]:
-                label = STAGE_LABELS.get(e["action"], e["action"])
+                label = STAGE_LABELS.get(e["accion"], e["accion"])
                 seen.add(label)
             for label in seen:
                 stage_counts[label] = stage_counts.get(label, 0) + 1

@@ -161,10 +161,10 @@ export default function VacancyDetailPage() {
                     {hist.map((h, i) => (
                       <li key={i} className="text-xs text-steel-600 leading-snug">
                         <div className="flex flex-wrap gap-x-2 gap-y-0.5 items-baseline">
-                          <span className="text-[10px] text-steel-400 tabular-nums shrink-0">{h.created_at || '—'}</span>
-                          <span className="font-semibold text-steel-700">{h.action}</span>
+                          <span className="text-[10px] text-steel-400 tabular-nums shrink-0">{h.fecha || '—'}</span>
+                          <span className="font-semibold text-steel-700">{h.accion}</span>
                         </div>
-                        {h.description && <p className="text-steel-500 mt-1">{h.description}</p>}
+                        {h.descripcion && <p className="text-steel-500 mt-1">{h.descripcion}</p>}
                       </li>
                     ))}
                   </ul>

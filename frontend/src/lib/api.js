@@ -20,14 +20,6 @@ async function fetchJson(path, options = {}) {
   return response.json()
 }
 
-function postJson(path, body = {}) {
-  return fetchJson(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-}
-
 export async function loginUser(username, password) {
   const response = await fetch(`${API}/auth/login/`, {
     method: 'POST',
@@ -37,6 +29,14 @@ export async function loginUser(username, password) {
   const data = await response.json()
   if (!response.ok) throw new Error(data.error || 'Error de autenticación')
   return data
+}
+
+function postJson(path, body = {}) {
+  return fetchJson(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
 }
 
 function rethrowConflict(e) {

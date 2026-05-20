@@ -10,6 +10,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
 from hiring.auth import jwt_required
+
 from hiring.models import CandidateChunk, CandidateDocument, GlobalStandard, MatchRun, MatchRunCandidate, Vacancy
 from hiring.services.analytics.dates import days_between
 from hiring.services.analytics.funnel import FunnelAnalyticsService
@@ -237,16 +238,14 @@ def default_weights(request):
 @require_GET
 def dashboard(request):
     try:
-        row = MySQLClient().fetch_one(
-            """
+        row = MySQLClient().fetch_one("""
             SELECT COUNT(*) AS total FROM gestor_rh_candidate_file d
-            WHERE d.type_file_id = 1
+            INNER JOIN gestor_rh_candidate_type_file tf ON tf.id = d.type_file_id
+            WHERE tf.name = 'CV'
               AND d.s3_url IS NOT NULL
               AND TRIM(d.s3_url) <> ''
               AND d.created_at >= %s
-        """,
-            (settings.DATA_CUTOFF_DATE,),
-        )
+        """, (settings.DATA_CUTOFF_DATE,))
         total_cvs_source = row.get("total", 0) if row else 0
     except Exception:
         total_cvs_source = 0
@@ -273,14 +272,13 @@ def dashboard(request):
         MatchRun.objects.order_by("-executed_at")[:5]
         .values("id", "vacancy_name", "candidates_evaluated", "top_score")
     )
-    try:
-        cache_key = f"hiring:dashboard_analytics:{settings.DATA_CUTOFF_DATE}"
-        analytics = cache.get(cache_key)
-        if analytics is None:
-            analytics = FunnelAnalyticsService().get_all()
+
+    cache_key = f"hiring:dashboard_analytics:{settings.DATA_CUTOFF_DATE}"
+    analytics = cache.get(cache_key)
+    if analytics is None:
+        analytics = FunnelAnalyticsService().get_all()
         cache.set(cache_key, analytics, settings.DASHBOARD_ANALYTICS_CACHE_SECONDS)
-    except Exception as e:
-        print(f"Error fetching dashboard analytics: {e}")
+
     return JsonResponse({
         "pipeline": {
             "cvs_indexados_percent": index_rate,
@@ -302,29 +300,27 @@ def dashboard(request):
 @require_GET
 def vacancy_detail(request, source_id):
     db = MySQLClient()
-    vacancy = db.fetch_one(
-        """
+    vacancy = db.fetch_one("""
         SELECT v.id, v.status_id, v.tipo_vacante, v.fecha_solicitud, v.authorized_at, v.fecha_rh,
-               COALESCE(sv.descripcion,'') AS status_label,
+               v.perfil_puesto_id,
+               COALESCE(sv.description,'') AS status_label,
                COALESCE(pp.nombre,'') AS perfil_nombre,
                COALESCE(pp.objetivo,'') AS perfil_objetivo
         FROM gestor_rh_vacante v
         LEFT JOIN gestor_rh_vacante_status sv ON sv.id = v.status_id
         LEFT JOIN gestor_rh_perfil_puesto pp ON pp.id = v.perfil_puesto_id
         WHERE v.id = %s
-    """,
-        (source_id,),
-    )
+    """, (source_id,))
     if not vacancy:
         return JsonResponse({"error": "Vacante no encontrada"}, status=404)
 
     candidates = db.fetch_all("""
-        SELECT vc.id, CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name) AS nombre, vc.correo, vc.status_id,
+        SELECT vc.id, vc.name, vc.correo, vc.status_id,
                COALESCE(cs.description,'') AS status_label
         FROM gestor_rh_candidate vc
         LEFT JOIN gestor_rh_candidate_status cs ON cs.id = vc.status_id
         WHERE vc.vacante_id = %s
-        ORDER BY vc.status_id, nombre
+        ORDER BY vc.status_id, vc.name
     """, (source_id,))
 
     by_status, descartados_count = {}, 0
@@ -333,13 +329,40 @@ def vacancy_detail(request, source_id):
             descartados_count += 1
         label = c["status_label"] or f"Status {c['status_id']}"
         by_status.setdefault(label, []).append({
-            "id": c["id"], "nombre": c["nombre"], "correo": c.get("correo", ""),
+            "id": c["id"], "nombre": c["name"], "correo": c.get("correo", ""),
         })
 
-    characteristics = db.fetch_all(
-        "SELECT tipo, descripcion FROM gestor_rh_vacante_caracteristica WHERE vacante_id = %s ORDER BY tipo, id",
-        (source_id,),
-    )
+    perfil_puesto_id = vacancy.get("perfil_puesto_id")
+    if perfil_puesto_id:
+        characteristics = db.fetch_all("""
+            SELECT r.name AS descripcion, 'responsabilidades' AS tipo
+            FROM gestor_rh_perfil_puesto_responsibility r
+            WHERE r.perfil_puesto_id = %s
+
+            UNION ALL
+
+            SELECT s.name AS descripcion,
+                   CASE s.type WHEN 2 THEN 'software' ELSE 'adicionales' END AS tipo
+            FROM gestor_rh_perfil_puesto_skill s
+            WHERE s.perfil_puesto_id = %s
+
+            UNION ALL
+
+            SELECT k.name AS descripcion, 'adicionales' AS tipo
+            FROM gestor_rh_perfil_puesto_kpi k
+            WHERE k.perfil_puesto_id = %s AND k.active = 1
+
+            UNION ALL
+
+            SELECT gc.name AS descripcion, 'adicionales' AS tipo
+            FROM gestor_rh_perfil_puesto_competence ppc
+            JOIN gestor_rh_competencia gc ON gc.id = ppc.competencia_id
+            WHERE ppc.perfil_puesto_id = %s AND ppc.activated = 1
+
+            ORDER BY tipo, descripcion
+        """, (perfil_puesto_id, perfil_puesto_id, perfil_puesto_id, perfil_puesto_id))
+    else:
+        characteristics = []
     history = db.fetch_all("""
         SELECT action, description, created_at FROM gestor_rh_vacante_history
         WHERE vacante_id = %s ORDER BY created_at DESC LIMIT 15
@@ -369,8 +392,8 @@ def vacancy_detail(request, source_id):
         },
         "candidates": {"total": len(candidates), "descartados_count": descartados_count, "by_status": by_status},
         "characteristics": [{"tipo": c["tipo"], "descripcion": c["descripcion"]} for c in characteristics],
-        "history": [{"action": h["action"], "description": h.get("description", ""),
-                     "created_at": str(h["created_at"])[:16] if h.get("created_at") else None} for h in history],
+        "history": [{"accion": h["action"], "descripcion": h.get("description", ""),
+                     "fecha": str(h["created_at"])[:16] if h.get("created_at") else None} for h in history],
         "matching_runs": runs,
         "candidate_pipeline": pipeline_data,
     })

@@ -86,11 +86,63 @@ class VacancySyncService:
         WHERE v.id = %s
     """
 
-    CHARACTERISTICS_QUERY = """
-        SELECT tipo, descripcion
-        FROM gestor_rh_vacante_caracteristica
-        WHERE vacante_id = %s
-        ORDER BY id
+    # skill.type=2 → 'software' (tools/herramientas), type=1 → 'adicionales' (knowledge/skills).
+    PROFILE_SECTIONS_QUERY = """
+        SELECT r.name AS descripcion, 'responsabilidades' AS tipo
+        FROM gestor_rh_perfil_puesto_responsibility r
+        WHERE r.perfil_puesto_id = %s
+
+        UNION ALL
+
+        SELECT s.name AS descripcion,
+               CASE s.type WHEN 2 THEN 'software' ELSE 'adicionales' END AS tipo
+        FROM gestor_rh_perfil_puesto_skill s
+        WHERE s.perfil_puesto_id = %s
+
+        UNION ALL
+
+        SELECT k.name AS descripcion, 'adicionales' AS tipo
+        FROM gestor_rh_perfil_puesto_kpi k
+        WHERE k.perfil_puesto_id = %s AND k.active = 1
+
+        UNION ALL
+
+        SELECT gc.name AS descripcion, 'adicionales' AS tipo
+        FROM gestor_rh_perfil_puesto_competence ppc
+        JOIN gestor_rh_competencia gc ON gc.id = ppc.competencia_id
+        WHERE ppc.perfil_puesto_id = %s AND ppc.activated = 1
+    """
+
+    PROFILE_SECTIONS_BULK_QUERY = """
+        SELECT v.id AS vacante_id, r.name AS descripcion, 'responsabilidades' AS tipo
+        FROM gestor_rh_vacante v
+        JOIN gestor_rh_perfil_puesto_responsibility r ON r.perfil_puesto_id = v.perfil_puesto_id
+        WHERE v.status_id = 4 AND v.perfil_puesto_id IS NOT NULL
+
+        UNION ALL
+
+        SELECT v.id AS vacante_id, s.name AS descripcion,
+               CASE s.type WHEN 2 THEN 'software' ELSE 'adicionales' END AS tipo
+        FROM gestor_rh_vacante v
+        JOIN gestor_rh_perfil_puesto_skill s ON s.perfil_puesto_id = v.perfil_puesto_id
+        WHERE v.status_id = 4 AND v.perfil_puesto_id IS NOT NULL
+
+        UNION ALL
+
+        SELECT v.id AS vacante_id, k.name AS descripcion, 'adicionales' AS tipo
+        FROM gestor_rh_vacante v
+        JOIN gestor_rh_perfil_puesto_kpi k ON k.perfil_puesto_id = v.perfil_puesto_id
+        WHERE v.status_id = 4 AND v.perfil_puesto_id IS NOT NULL AND k.active = 1
+
+        UNION ALL
+
+        SELECT v.id AS vacante_id, gc.name AS descripcion, 'adicionales' AS tipo
+        FROM gestor_rh_vacante v
+        JOIN gestor_rh_perfil_puesto_competence ppc ON ppc.perfil_puesto_id = v.perfil_puesto_id
+        JOIN gestor_rh_competencia gc ON gc.id = ppc.competencia_id
+        WHERE v.status_id = 4 AND v.perfil_puesto_id IS NOT NULL AND ppc.activated = 1
+
+        ORDER BY vacante_id, tipo
     """
 
     def __init__(self):
@@ -147,15 +199,11 @@ class VacancySyncService:
     def _fetch_all_vacancies(self) -> list[RawVacancy]:
         rows = self.db.fetch_all(self.VACANTES_QUERY)
 
-        all_chars = self.db.fetch_all("""
-            SELECT vacante_id, tipo, descripcion
-            FROM gestor_rh_vacante_caracteristica
-            ORDER BY vacante_id, id
-        """)
+        # Pull all profile sections in one bulk query, grouped by vacante_id.
+        all_sections = self.db.fetch_all(self.PROFILE_SECTIONS_BULK_QUERY)
 
-        # Group by vacante_id
         chars_by_vacante: dict[int, list[RawCharacteristic]] = {}
-        for row in all_chars:
+        for row in all_sections:
             desc = (row.get("descripcion") or "").strip()
             if self._is_trivial(desc):
                 continue
@@ -176,11 +224,16 @@ class VacancySyncService:
         if row is None:
             return None
         v = self._map_row(row)
-        v.characteristics = self._fetch_characteristics(v.source_id)
+        v.characteristics = self._fetch_characteristics(v.profile_source_id)
         return v
 
-    def _fetch_characteristics(self, vacante_id: int) -> list[RawCharacteristic]:
-        rows = self.db.fetch_all(self.CHARACTERISTICS_QUERY, (vacante_id,))
+    def _fetch_characteristics(self, perfil_puesto_id: int | None) -> list[RawCharacteristic]:
+        if not perfil_puesto_id:
+            return []
+        rows = self.db.fetch_all(
+            self.PROFILE_SECTIONS_QUERY,
+            (perfil_puesto_id, perfil_puesto_id, perfil_puesto_id, perfil_puesto_id),
+        )
         return [
             RawCharacteristic(
                 tipo=(row.get("tipo") or "").strip(),
