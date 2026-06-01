@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from django.conf import settings
 from hiring.services.analytics.dates import days_between
@@ -13,34 +14,49 @@ DISCARD_PATTERNS = [
     ("Otro", re.compile(r".*")),
 ]
 
-STAGE_LABELS = {
-    "Nuevo Candidato": "Filtros RH",
-    "Candidato Aprobado": "Aprobado",
-    "Se agenda la entrevista": "Agenda Entrevista",
-    "Entrevistado": "Entrevistado",
-    "Candidato Final": "Finalista",
-    "propuesta": "Propuesta",
-    "Se Agendo Ingreso": "Ingreso",
-    "Vacante Finalizada": "Contratado",
-}
+@dataclass(frozen=True)
+class FunnelStage:
+    key: str
+    label: str
+    aliases: tuple[str, ...]
 
-# Ordered list for building conversion funnels
-STAGE_ORDER_LABELS = [
-    "Filtros RH", "Aprobado", "Agenda Entrevista", "Entrevistado",
-    "Finalista", "Propuesta", "Ingreso", "Contratado",
-]
 
-FUNNEL_HISTORY_ACTIONS = (
-    "Nuevo Candidato",
-    "Se agenda la entrevista",
-    "Entrevistado",
-    "Candidato Aprobado",
-    "Candidato Final",
-    "propuesta",
-    "Se Agendo Ingreso",
-    "Vacante Finalizada",
+# Canonical funnel stages. Aliases cover legacy Spanish actions and new client actions.
+_FUNNEL_STAGES: tuple[FunnelStage, ...] = (
+    FunnelStage("new_candidate", "Filtros RH", ("Nuevo Candidato", "Nuevo", "created")),
+    FunnelStage("scheduled", "Agenda Entrevista", ("Se agenda la entrevista", "Agendar", "scheduled")),
+    FunnelStage("interviewed", "Entrevistado", ("Entrevistado", "interview")),
+    FunnelStage("final_candidate", "Finalista", ("Candidato Final", "Final", "final_candidate")),
+    FunnelStage("offer", "Propuesta", ("propuesta", "offer")),
+    FunnelStage("onboard", "Ingreso", ("Se Agendo Ingreso", "onboard")),
+    FunnelStage("hired", "Contratado", ("Vacante Finalizada", "finished")),
 )
-_FUNNEL_ACTIONS_SQL_IN = ", ".join(["%s"] * len(FUNNEL_HISTORY_ACTIONS))
+
+
+class FunnelStageRegistry:
+    def __init__(self, stages: tuple[FunnelStage, ...]):
+        self.stages = stages
+        self.by_key = {stage.key: stage for stage in stages}
+        self.labels = tuple(stage.label for stage in stages)
+        self.history_actions = tuple(dict.fromkeys(
+            alias for stage in stages for alias in stage.aliases
+        ))
+        self.history_actions_sql_in = ", ".join(["%s"] * len(self.history_actions))
+        self._action_to_key = {
+            alias.strip().casefold(): stage.key
+            for stage in stages
+            for alias in stage.aliases
+        }
+
+    def resolve_key(self, action: str | None) -> str | None:
+        return self._action_to_key.get((action or "").strip().casefold())
+
+    def resolve_label(self, action: str | None) -> str:
+        key = self.resolve_key(action)
+        return self.by_key[key].label if key else (action or "—")
+
+
+FUNNEL = FunnelStageRegistry(_FUNNEL_STAGES)
 
 
 class FunnelAnalyticsService:
@@ -81,37 +97,33 @@ class FunnelAnalyticsService:
             INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidate_id
             INNER JOIN gestor_rh_vacante v ON v.id = vc.vacante_id
             WHERE v.fecha_solicitud >= %s
-              AND h.action IN ({_FUNNEL_ACTIONS_SQL_IN})
-        """, (self.cutoff, *FUNNEL_HISTORY_ACTIONS))
+            AND h.action IN ({FUNNEL.history_actions_sql_in})
+        """, (self.cutoff, *FUNNEL.history_actions))
 
-        # Count unique candidates per stage
-        stage_candidates: dict[str, set] = {}
+        stage_candidates: dict[str, set] = {
+            stage.key: set()
+            for stage in FUNNEL.stages
+        }
+
         for r in rows:
-            action = r["action"]
-            cid = r["candidate_id"]
-            stage_candidates.setdefault(action, set()).add(cid)
+            stage_key = FUNNEL.resolve_key(r.get("action"))
+
+            if not stage_key:
+                continue
+
+            stage_candidates[stage_key].add(r["candidate_id"])
 
         all_cids = set().union(*stage_candidates.values()) if stage_candidates else set()
         total = len(all_cids)
 
-        # Build ordered funnel — order matches real candidate flow
-        funnel_def = [
-            ("Nuevo Candidato", "Filtros RH"),
-            ("Candidato Aprobado", "Aprobado"),
-            ("Se agenda la entrevista", "Agenda Entrevista"),
-            ("Entrevistado", "Entrevistado"),
-            ("Candidato Final", "Candidato Final"),
-            ("propuesta", "Propuesta"),
-            ("Se Agendo Ingreso", "Ingreso"),
-            ("Vacante Finalizada", "Contratado"),
-        ]
-
         stages = []
-        for action, label in funnel_def:
-            count = len(stage_candidates.get(action, set()))
+
+        for stage in FUNNEL.stages:
+            count = len(stage_candidates.get(stage.key, set()))
+
             if count > 0:
                 stages.append({
-                    "label": label,
+                    "label": stage.label,
                     "count": count,
                     "pct": _pct(count, total),
                 })
@@ -145,7 +157,8 @@ class FunnelAnalyticsService:
             SELECT h.description
             FROM gestor_rh_vacante_history h
             LEFT JOIN gestor_rh_vacante v ON v.id=h.vacante_id
-            WHERE h.action='Actualización de candidato' AND h.description LIKE '%%descarto%%'
+            WHERE h.action IN ('Actualización de candidato', 'candidato')
+              AND (h.description LIKE '%%descarto%%' OR h.description LIKE '%%deshabilitado%%')
               AND v.fecha_solicitud >= %s
             ORDER BY h.created_at DESC LIMIT %s
         """, (self.cutoff, limit))
@@ -182,29 +195,43 @@ class FunnelAnalyticsService:
             INNER JOIN gestor_rh_candidate vc ON vc.id = h.candidate_id
             INNER JOIN gestor_rh_vacante v ON v.id = vc.vacante_id
             WHERE v.fecha_solicitud >= %s
-              AND h.action IN ({_FUNNEL_ACTIONS_SQL_IN})
+            AND h.action IN ({FUNNEL.history_actions_sql_in})
             ORDER BY h.candidate_id, h.created_at
-        """, (self.cutoff, *FUNNEL_HISTORY_ACTIONS))
+        """, (self.cutoff, *FUNNEL.history_actions))
 
-        # Group actions by candidate
         by_candidate: dict[int, list[tuple[str, object]]] = {}
-        for r in rows:
-            cid = r["candidate_id"]
-            by_candidate.setdefault(cid, []).append((r["action"], r["created_at"]))
 
-        # Compute transition times
+        for r in rows:
+            stage_key = FUNNEL.resolve_key(r.get("action"))
+
+            if not stage_key:
+                continue
+
+            cid = r["candidate_id"]
+            by_candidate.setdefault(cid, []).append((stage_key, r["created_at"]))
+
         transitions: dict[str, list[float]] = {}
+
         for cid, actions in by_candidate.items():
             for i in range(len(actions) - 1):
-                from_action, from_date = actions[i]
-                to_action, to_date = actions[i + 1]
+                from_stage_key, from_date = actions[i]
+                to_stage_key, to_date = actions[i + 1]
+
+                if from_stage_key == to_stage_key:
+                    continue
+
                 if from_date and to_date:
-                    delta = (to_date - from_date).total_seconds() / 86400  # days
+                    delta = (to_date - from_date).total_seconds() / 86400
+
                     if 0 <= delta <= 365:
-                        key = f"{STAGE_LABELS.get(from_action, from_action)} → {STAGE_LABELS.get(to_action, to_action)}"
+                        from_label = FUNNEL.by_key[from_stage_key].label
+                        to_label = FUNNEL.by_key[to_stage_key].label
+                        key = f"{from_label} → {to_label}"
+
                         transitions.setdefault(key, []).append(delta)
 
         sla_stages = []
+
         for key, days_list in transitions.items():
             if len(days_list) >= 2:
                 sla_stages.append({
@@ -213,7 +240,6 @@ class FunnelAnalyticsService:
                     "count": len(days_list),
                 })
 
-        # Sort by frequency
         sla_stages.sort(key=lambda x: x["count"], reverse=True)
 
         return {"stages": sla_stages[:10]}
@@ -288,11 +314,21 @@ class FunnelAnalyticsService:
                     except (ValueError, TypeError):
                         pass
 
-            current_stage = events[-1]["accion"] if events else "—"
+            funnel_events = [
+                e for e in events
+                if FUNNEL.resolve_key(e.get("accion"))
+            ]
+
+            current_stage = (
+                FUNNEL.resolve_label(funnel_events[-1]["accion"])
+                if funnel_events
+                else events[-1]["accion"] if events else "—"
+            )
+
             candidates.append({
                 "candidato_id": cid,
                 "nombre": data["nombre"],
-                "current_stage": STAGE_LABELS.get(current_stage, current_stage),
+                "current_stage": current_stage,
                 "total_events": len(events),
                 "total_days": total_days,
                 "events": events,
@@ -303,19 +339,24 @@ class FunnelAnalyticsService:
         stage_counts: dict[str, int] = {}
         for c in candidates:
             seen = set()
+
             for e in c["events"]:
-                label = STAGE_LABELS.get(e["accion"], e["accion"])
+                if not FUNNEL.resolve_key(e.get("accion")):
+                    continue
+
+                label = FUNNEL.resolve_label(e.get("accion"))
                 seen.add(label)
+
             for label in seen:
                 stage_counts[label] = stage_counts.get(label, 0) + 1
 
         total_candidates = len(candidates)
         conversion = []
-        for stage in STAGE_ORDER_LABELS:
-            count = stage_counts.get(stage, 0)
+        for stage_label in FUNNEL.labels:
+            count = stage_counts.get(stage_label, 0)
             if count > 0:
                 conversion.append({
-                    "stage": stage,
+                    "stage": stage_label,
                     "count": count,
                     "pct": _pct(count, total_candidates),
                 })

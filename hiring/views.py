@@ -9,8 +9,6 @@ from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
-from hiring.auth import jwt_required
-
 from hiring.models import CandidateChunk, CandidateDocument, GlobalStandard, MatchRun, MatchRunCandidate, Vacancy
 from hiring.services.analytics.dates import days_between
 from hiring.services.analytics.funnel import FunnelAnalyticsService
@@ -47,7 +45,6 @@ def health(request):
     return JsonResponse({"status": "ok", "postgres": db_status, "pgvector": pgvector})
 
 
-@jwt_required
 @require_GET
 def list_vacancies(request):
     qs = Vacancy.objects.order_by("-fecha_solicitud")
@@ -58,7 +55,6 @@ def list_vacancies(request):
     ]})
 
 
-@jwt_required
 @require_POST
 def run_matching(request, source_id):
     try:
@@ -228,20 +224,18 @@ def run_matching(request, source_id):
     })
 
 
-@jwt_required
 @require_GET
 def default_weights(request):
     return JsonResponse({"weights": DEFAULT_WEIGHTS})
 
 
-@jwt_required
 @require_GET
 def dashboard(request):
     try:
         row = MySQLClient().fetch_one("""
             SELECT COUNT(*) AS total FROM gestor_rh_candidate_file d
             INNER JOIN gestor_rh_candidate_type_file tf ON tf.id = d.type_file_id
-            WHERE tf.name = 'CV'
+            WHERE (tf.name = 'CV' OR tf.name = 'Curriculum vitae')
               AND d.s3_url IS NOT NULL
               AND TRIM(d.s3_url) <> ''
               AND d.created_at >= %s
@@ -296,7 +290,6 @@ def dashboard(request):
     })
 
 
-@jwt_required
 @require_GET
 def vacancy_detail(request, source_id):
     db = MySQLClient()
@@ -399,7 +392,6 @@ def vacancy_detail(request, source_id):
     })
 
 
-@jwt_required
 @require_POST
 def pipeline_ingest(request):
     body, err = _parse_json_body(request)
@@ -412,7 +404,6 @@ def pipeline_ingest(request):
     return JsonResponse({"status": "started", "task": "ingest"})
 
 
-@jwt_required
 @require_POST
 def pipeline_sync(request):
     if not start_sync_vacancies():
@@ -420,7 +411,6 @@ def pipeline_sync(request):
     return JsonResponse({"status": "started", "task": "sync_vacancies"})
 
 
-@jwt_required
 @require_GET
 def pipeline_status(request):
     return JsonResponse(get_status())
@@ -428,14 +418,12 @@ def pipeline_status(request):
 
 # --- Standards API ---
 
-@jwt_required
 @require_GET
 def list_standards(request):
     standards = GlobalStandard.objects.all()
     return JsonResponse({"standards": [_standard_to_dict(s) for s in standards]})
 
 
-@jwt_required
 @require_GET
 def attribute_catalog(request):
     catalog = get_attribute_catalog()
@@ -445,7 +433,6 @@ def attribute_catalog(request):
     }})
 
 
-@jwt_required
 @require_POST
 def create_standard(request):
     body, err = _parse_json_body(request)
@@ -484,7 +471,6 @@ def create_standard(request):
     return JsonResponse(_standard_to_dict(standard))
 
 
-@jwt_required
 @require_POST
 def update_standard(request, standard_id):
     try:
@@ -522,7 +508,6 @@ def update_standard(request, standard_id):
     return JsonResponse(_standard_to_dict(standard))
 
 
-@jwt_required
 @require_POST
 def delete_standard(request, standard_id):
     try:

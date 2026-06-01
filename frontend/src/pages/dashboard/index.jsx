@@ -10,11 +10,13 @@ import DashboardSlaPanel from './components/SlaPanel'
 import DashboardInsightsRow from './components/InsightsRow'
 import VacanciesTable from './components/VacanciesTable'
 
-function ActionBtn({ icon: Icon, onClick, children, secondary }) {
+function ActionBtn({ icon: Icon, onClick, children, secondary, disabled }) {
   return (
-    <button type="button" onClick={onClick}
+    <button type="button" onClick={onClick} disabled={disabled}
       className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-        secondary
+        disabled
+          ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400'
+          : secondary
           ? 'border border-slate-200 bg-white text-steel-700 hover:bg-steel-50'
           : 'bg-steel-800 text-white hover:bg-steel-900'
       }`}>
@@ -26,7 +28,8 @@ function ActionBtn({ icon: Icon, onClick, children, secondary }) {
 export default function DashboardPage() {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
-  const { startIngest, startSync } = usePipeline()
+  const { status, startIngest, startSync } = usePipeline()
+  const pipelineRunning = Boolean(status?.running)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -50,8 +53,8 @@ export default function DashboardPage() {
         description="Métricas del pipeline, embudo de candidatos y vacantes activas."
         actions={
           <>
-            <ActionBtn icon={Play} onClick={() => startIngest(load)}>Indexar CVs</ActionBtn>
-            <ActionBtn icon={RefreshCw} secondary onClick={() => startSync(load)}>Sincronizar</ActionBtn>
+            <ActionBtn icon={Play} onClick={() => startIngest(load)} disabled={pipelineRunning}>Indexar CVs</ActionBtn>
+            <ActionBtn icon={RefreshCw} secondary onClick={() => startSync(load)} disabled={pipelineRunning}>Sincronizar</ActionBtn>
           </>
         }
       />
