@@ -28,7 +28,6 @@ _FUNNEL_STAGES: tuple[FunnelStage, ...] = (
     FunnelStage("interviewed", "Entrevistado", ("Entrevistado", "interview")),
     FunnelStage("final_candidate", "Finalista", ("Candidato Final", "Final", "final_candidate")),
     FunnelStage("offer", "Propuesta", ("propuesta", "offer")),
-    FunnelStage("onboard", "Ingreso", ("Se Agendo Ingreso", "onboard")),
     FunnelStage("hired", "Contratado", ("Vacante Finalizada", "finished")),
 )
 

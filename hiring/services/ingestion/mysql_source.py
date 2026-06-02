@@ -24,7 +24,7 @@ class MySQLSourceService:
             d.created_by_id,
             d.created_at AS upload_date,
             d.s3_url AS source_key,
-            COALESCE(vc.name, '') AS candidate_name,
+            COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_first_name, vc.maternal_first_name), '') AS candidate_name,
             COALESCE(vc.correo, '') AS candidate_email,
             COALESCE(vc.celular, '') AS candidate_phone,
             vc.vacante_id
@@ -32,7 +32,7 @@ class MySQLSourceService:
         INNER JOIN gestor_rh_candidate_type_file tf ON tf.id = d.type_file_id
         LEFT JOIN gestor_rh_candidate vc
             ON vc.id = d.candidate_id
-        WHERE tf.name = 'CV'
+        WHERE (tf.name = 'CV' OR tf.name = 'Curriculum vitae')
           AND d.s3_url IS NOT NULL
           AND TRIM(d.s3_url) <> ''
           AND d.created_at >= %s
