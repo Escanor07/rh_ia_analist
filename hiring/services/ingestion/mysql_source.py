@@ -24,7 +24,7 @@ class MySQLSourceService:
             d.created_by_id,
             d.created_at AS upload_date,
             d.s3_url AS source_key,
-            COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_first_name, vc.maternal_first_name), '') AS candidate_name,
+            COALESCE(CONCAT_WS(' ', vc.name, vc.paternal_last_name, vc.maternal_last_name), '') AS candidate_name,
             COALESCE(vc.correo, '') AS candidate_email,
             COALESCE(vc.celular, '') AS candidate_phone,
             vc.vacante_id
